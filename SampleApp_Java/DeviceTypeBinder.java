@@ -33,6 +33,12 @@ interface CmdDeviceEnable {
 }
 
 @FunctionalInterface
+interface CmdGetDeviceEnable {
+
+    boolean Get() throws JposException;
+}
+
+@FunctionalInterface
 interface CmdDataEventEnable {
 
     void Set(boolean value) throws JposException;
@@ -110,6 +116,36 @@ interface CmdPhysicalDeviceDescription {
     String Get() throws JposException;
 }
 
+@FunctionalInterface
+interface CmdUpdateStat {
+
+    void Set(String value) throws JposException;
+}
+
+@FunctionalInterface
+interface CmdRetreiveStat {
+
+    void Get(String[] value) throws JposException;
+}
+
+@FunctionalInterface
+interface CmdResetStat {
+
+    void Set(String value) throws JposException;
+}
+
+@FunctionalInterface
+interface CmdPowerNotify {
+
+    void Set(int value) throws JposException;
+}
+
+@FunctionalInterface
+interface CmdPowerState {
+
+    int Get() throws JposException;
+}
+
 /**
  * This class binds common methods in scanner and scale devices.
  *
@@ -123,6 +159,7 @@ public class DeviceTypeBinder {
     public CmdRelease releaseCommand;
     public CmdClose closeCommand;
     public CmdDeviceEnable dEnableCommand;
+    public CmdGetDeviceEnable getDeviceEnableCommand;
     public CmdDataEventEnable dataEventCommand;
     public CmdFreezeEvents freezeEventsComand;
     public CmdHealthCheck healthCheckCommand;
@@ -137,6 +174,12 @@ public class DeviceTypeBinder {
     public CmdServiceDescription serviceDescriptionCommand;
     public CmdPhysicalDeviceDescription physicalDeviceDescriptionCommand;
     public CmdPhysicalDeviceName physicalDeviceNameCommand;
+
+    public CmdUpdateStat updateStatCommand;
+    public CmdRetreiveStat retrieveStatCommand;
+    public CmdResetStat resetStatisticsCommand;
+    public CmdPowerNotify powerNotifyCommand;
+    public CmdPowerState powerStateCommand;
 
     /**
      * Return a String value (Scanner or Scale)
@@ -196,6 +239,16 @@ public class DeviceTypeBinder {
      */
     public void setDeviceEnable(boolean value) throws JposException {
         dEnableCommand.Set(value);
+    }
+
+    /**
+     * This method returns the deviceEnable status
+     *
+     * @return boolean value (true if device is enabled false otherwise)
+     * @throws JposException
+     */
+    public boolean getDeviceEnable() throws JposException {
+        return getDeviceEnableCommand.Get();
     }
 
     /**
@@ -289,4 +342,31 @@ public class DeviceTypeBinder {
         directIOCommand.Set(value, data, object);
     }
 
+    /**
+     * This method is used to retrieve statistics
+     *
+     * @param value : String array to hold the InXml and OutXml
+     * @throws JposException
+     */
+    public void retrieveStatistics(String[] value) throws JposException {
+        retrieveStatCommand.Get(value);
+    }
+
+    /**
+     * This method is used to reset statistics
+     *
+     * @param value : 
+     * @throws JposException
+     */
+    public void resetStatistics(String value) throws JposException {
+        resetStatisticsCommand.Set(value);
+    }
+
+    public void setPowerNotify(int value) throws JposException {
+        powerNotifyCommand.Set(value);
+    }
+
+    public int getPowerState() throws JposException {
+        return powerStateCommand.Get();
+    }
 }

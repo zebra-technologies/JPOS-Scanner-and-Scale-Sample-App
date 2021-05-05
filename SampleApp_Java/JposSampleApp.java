@@ -1,11 +1,17 @@
 package JposTest.src;
 
+import com.zebra.jpos.serviceonscale.directio.DirectIOStatus;
+import com.zebra.jpos.serviceonscanner.directio.DirectIOCommand;
+import java.awt.Font;
 import java.awt.Toolkit;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.StringSelection;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.DefaultComboBoxModel;
@@ -14,12 +20,22 @@ import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Source;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.transform.stream.StreamSource;
 
 import jpos.JposConst;
 import jpos.JposException;
 import jpos.Scale;
 import static jpos.ScaleConst.*;
 import jpos.Scanner;
+import jpos.config.JposEntry;
+import jpos.config.simple.SimpleEntryRegistry;
+import jpos.config.simple.xml.SimpleXmlRegPopulator;
 import jpos.events.DataEvent;
 import jpos.events.DataListener;
 import jpos.events.ErrorEvent;
@@ -41,9 +57,11 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private boolean freezeEventsEnabled = false;
     private int healthCheckType = -1;
     public static String healthCheckText;
+    public static int powerState = -1;
     private String info;
     private String[] errorStatus = new String[2];
     private String[] setPropertyStatus = new String[2];
+    private int powerNotifyEnabled = -1;
 
     private int opCode;
     private StringBuffer deviceParams;                          //InOutXml 
@@ -61,6 +79,9 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     public static int scanDataType;
     public static int scanDataCount = 0;
 
+    private String resetStatValue;
+    private String[] retrieveStatValue = new String[1];
+
     //scale variables
     static Scale scale = new Scale();
 
@@ -75,7 +96,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private int statusNotifyEnabled;
     private float weightAM;
     private String[] weightInAsyncM = new String[2];
-            
+
     //service object status
     public static boolean fastModeScannerC = true;
     public static boolean fastModeScaleC = true;
@@ -86,6 +107,9 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     public static boolean autoDisableC = true;
     public static boolean asyncModeC = true;
     public static boolean directIOC = true;
+    public static boolean statusNotifyC = true;
+    public static boolean powerNotifyC = true;
+    public static boolean error = false;
 
     //set properties
     private boolean setValue;
@@ -98,13 +122,31 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
 
         try {
             // Set System L&F
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            String os = System.getProperty("os.name").toLowerCase();
+
+            if (isWindows(os)) {
+                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+
+            } else {
+                UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+            }
             initComponents();
+
+            /**
+             * hide power notification components in scale pane since power
+             * notification feature is not implemented in scale
+             */
+            chkSclPowerNotify.setVisible(true);
+            btnSclPowerState.setVisible(false);
+            txtSclPowerState.setVisible(false);
 
             DeviceCategorySelection deviceC = new DeviceCategorySelection();
 
             //populate the device category drop-down list
             this.cmbDeviceCategory.setModel(deviceC.deviceCategory());
+
+            //populate logical devices drop-down list
+            logicalDeviceName("Scanner");
 
             //populate property drop-down lists
             this.cmbScnProperties.setModel(deviceC.scannerProperty());
@@ -121,8 +163,63 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             scanDataText.setSelected(true);
 
             scanner.addDataListener(this);
+            scanner.addStatusUpdateListener(new StatusUpdateListener() {
+                
+                @Override
+                public void statusUpdateOccurred(StatusUpdateEvent sue) {
+                    DeviceTypeBinder deviceTypeBinder = (DeviceTypeBinder) cmbDeviceCategory.getSelectedItem();
 
-            scale.addStatusUpdateListener(this);
+                    SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("dd-MM-yy: HH:mm:ss");
+                    Date today = new Date();
+                    String date = DATE_FORMAT.format(today);
+                    
+                    String statusText = "";
+                    switch(sue.getStatus()){
+                        case JposConst.JPOS_PS_ONLINE :
+                            statusText = " JPOS_PS_ONLINE";
+                            break;
+                            
+                        case JposConst.JPOS_PS_OFF_OFFLINE :
+                            statusText = " JPOS_PS_OFF_OFFLINE";
+                            break;
+                            
+                        case JposConst.JPOS_PS_UNKNOWN :
+                            statusText = " JPOS_PS_UNKNOWN";
+                            break;
+                    }
+                    txtLogView.setText(txtLogView.getText() + "\n" + date + " : " + deviceTypeBinder.getDevice() + "      :" + "Status Update Event: " + sue.getStatus() + statusText);
+                    
+                }
+            });
+
+            scale.addStatusUpdateListener(new StatusUpdateListener() {
+                
+                @Override
+                public void statusUpdateOccurred(StatusUpdateEvent sue) {
+                    DeviceTypeBinder deviceTypeBinder = (DeviceTypeBinder) cmbDeviceCategory.getSelectedItem();
+
+                    SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("dd-MM-yy: HH:mm:ss");
+                    Date today = new Date();
+                    String date = DATE_FORMAT.format(today);
+                    
+                    String statusText = "";
+                    switch(sue.getStatus()){
+                        case JposConst.JPOS_PS_ONLINE :
+                            statusText = " JPOS_PS_ONLINE";
+                            break;
+                            
+                        case JposConst.JPOS_PS_OFF_OFFLINE :
+                            statusText = " JPOS_PS_OFF_OFFLINE";
+                            break;
+                            
+                        case JposConst.JPOS_PS_UNKNOWN :
+                            statusText = " JPOS_PS_UNKNOWN";
+                            break;
+                    }
+                    txtLogView.setText(txtLogView.getText() + "\n" + date + " : " + deviceTypeBinder.getDevice() + "      :" + "Status Update Event: " + sue.getStatus() + statusText);
+                    
+                }
+            });
             scale.addErrorListener(this);
             scale.addDataListener(new DataListener() {
 
@@ -174,17 +271,14 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                     }
                 }
             });
-        } catch (UnsupportedLookAndFeelException e) {
-            Logger.getLogger(JposSampleApp.class.getName()).log(Level.SEVERE, null, e);
-        } catch (ClassNotFoundException e) {
-            Logger.getLogger(JposSampleApp.class.getName()).log(Level.SEVERE, null, e);
-        } catch (InstantiationException e) {
-            Logger.getLogger(JposSampleApp.class.getName()).log(Level.SEVERE, null, e);
-        } catch (IllegalAccessException e) {
-            Logger.getLogger(JposSampleApp.class.getName()).log(Level.SEVERE, null, e);
-        } catch (JposException e) {
+        } catch (UnsupportedLookAndFeelException | ClassNotFoundException | InstantiationException | IllegalAccessException | JposException e) {
             Logger.getLogger(JposSampleApp.class.getName()).log(Level.SEVERE, null, e);
         }
+    }
+
+    //check for platform
+    private boolean isWindows(String os) {
+        return (os.contains("win"));
     }
 
     /**
@@ -222,6 +316,9 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         chkScnFreezeEvents = new javax.swing.JCheckBox();
         chkScnAutoDisable = new javax.swing.JCheckBox();
         chkScnAutoDeviceEnable = new javax.swing.JCheckBox();
+        chkScnPowerNotify = new javax.swing.JCheckBox();
+        txtScnPowerState = new javax.swing.JTextField();
+        btnScnPowerState = new javax.swing.JButton();
         scnPanelRecData = new javax.swing.JPanel();
         lblScanDataLabel = new javax.swing.JLabel();
         jScrollPane3 = new javax.swing.JScrollPane();
@@ -237,14 +334,21 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         btnClearInput = new javax.swing.JButton();
         chkScnDecodeData = new javax.swing.JCheckBox();
         scanDataHex = new javax.swing.JRadioButton();
-        scnPanelProperties = new javax.swing.JPanel();
-        cmbScnProperties = new javax.swing.JComboBox();
-        lblScnPropertyValue = new javax.swing.JLabel();
-        txtScnPropertyValue = new javax.swing.JTextField();
-        btnScnProperties = new javax.swing.JButton();
-        btnScnClearInputProperties = new javax.swing.JButton();
+        scnPanelCheckHealth = new javax.swing.JPanel();
+        scnInternalCH = new javax.swing.JRadioButton();
+        scnExternalCH = new javax.swing.JRadioButton();
+        scnInteractiveCH = new javax.swing.JRadioButton();
+        btnScnCheckHealth = new javax.swing.JButton();
+        lblScnCheckHealthText = new javax.swing.JLabel();
+        txtScnHealthCheckText = new javax.swing.JTextField();
+        btnScnCheckHealthText = new javax.swing.JButton();
+        scnPanelStat = new javax.swing.JPanel();
+        lblScnStatistic = new javax.swing.JTextField();
+        btnScnRetreiveStat = new javax.swing.JButton();
+        btnScnResetStat = new javax.swing.JButton();
+        jScrollPane1 = new javax.swing.JScrollPane();
+        txtScnStatOutput = new javax.swing.JTextArea();
         scnPanelDirectIO = new javax.swing.JPanel();
-        lblScnCommand = new javax.swing.JLabel();
         cmbScnCommand = new javax.swing.JComboBox();
         btnScnExecute = new javax.swing.JButton();
         lblScnStatus = new javax.swing.JLabel();
@@ -257,14 +361,13 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         jScrollPane4 = new javax.swing.JScrollPane();
         txtScnInxml = new javax.swing.JTextArea();
         btnScnCopy = new javax.swing.JButton();
-        scnPanelCheckHealth = new javax.swing.JPanel();
-        scnInternalCH = new javax.swing.JRadioButton();
-        scnExternalCH = new javax.swing.JRadioButton();
-        scnInteractiveCH = new javax.swing.JRadioButton();
-        btnScnCheckHealth = new javax.swing.JButton();
-        lblScnCheckHealthText = new javax.swing.JLabel();
-        txtScnHealthCheckText = new javax.swing.JTextField();
-        btnScnCheckHealthText = new javax.swing.JButton();
+        lblScnCommand = new javax.swing.JLabel();
+        scnPanelProperties = new javax.swing.JPanel();
+        cmbScnProperties = new javax.swing.JComboBox();
+        lblScnPropertyValue = new javax.swing.JLabel();
+        txtScnPropertyValue = new javax.swing.JTextField();
+        btnScnProperties = new javax.swing.JButton();
+        btnScnClearInputProperties = new javax.swing.JButton();
         scalePanel = new javax.swing.JPanel();
         sclPanelDataEvent = new javax.swing.JPanel();
         chkSclDeviceEnable = new javax.swing.JCheckBox();
@@ -273,14 +376,9 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         chkSclAutoDeviceEnable = new javax.swing.JCheckBox();
         chkSclAutoDisable = new javax.swing.JCheckBox();
         chkSclAutoDataEventEnable = new javax.swing.JCheckBox();
-        sclPanelCheckHealth = new javax.swing.JPanel();
-        sclInternal = new javax.swing.JRadioButton();
-        sclExternal = new javax.swing.JRadioButton();
-        sclInteractive = new javax.swing.JRadioButton();
-        btnSclCheckHealth = new javax.swing.JButton();
-        lblSclCHText = new javax.swing.JLabel();
-        txtSclCheckHealthText = new javax.swing.JTextField();
-        btnSclCHText = new javax.swing.JButton();
+        chkSclPowerNotify = new javax.swing.JCheckBox();
+        txtSclPowerState = new javax.swing.JTextField();
+        btnSclPowerState = new javax.swing.JButton();
         sclPanelScaleWeight = new javax.swing.JPanel();
         lblSclReadWeght = new javax.swing.JLabel();
         txtSclRWTimeout = new javax.swing.JTextField();
@@ -288,11 +386,19 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         btnSclReadWeight = new javax.swing.JButton();
         btnSclZeroScale = new javax.swing.JButton();
         btnSclClearInput = new javax.swing.JButton();
-        jLabel2 = new javax.swing.JLabel();
+        lblSclWeight = new javax.swing.JLabel();
         chkSclAsyncMode = new javax.swing.JCheckBox();
         sclPanelLiveWeight = new javax.swing.JPanel();
         txtSclLiveWeight = new javax.swing.JTextField();
         chkSclEnableLiveWeight = new javax.swing.JCheckBox();
+        sclPanelCheckHealth = new javax.swing.JPanel();
+        sclInternal = new javax.swing.JRadioButton();
+        sclExternal = new javax.swing.JRadioButton();
+        sclInteractive = new javax.swing.JRadioButton();
+        btnSclCheckHealth = new javax.swing.JButton();
+        txtSclCheckHealthText = new javax.swing.JTextField();
+        btnSclCHText = new javax.swing.JButton();
+        lblSclCHText = new javax.swing.JLabel();
         sclPanelDirectIO = new javax.swing.JPanel();
         lblSclCommand = new javax.swing.JLabel();
         cmbSclCommand = new javax.swing.JComboBox();
@@ -307,6 +413,12 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         txtSclStatus = new javax.swing.JTextField();
         btnSclClear = new javax.swing.JButton();
         btnSclCopy = new javax.swing.JButton();
+        sclPanelStat = new javax.swing.JPanel();
+        lblSclStatistic = new javax.swing.JTextField();
+        btnSclResetStat = new javax.swing.JButton();
+        btnSclRetreiveStat = new javax.swing.JButton();
+        jScrollPane10 = new javax.swing.JScrollPane();
+        txtSclStatOutput = new javax.swing.JTextArea();
         sclPanelProperties = new javax.swing.JPanel();
         cmbSclProperties = new javax.swing.JComboBox();
         lblSclPropertyValue = new javax.swing.JLabel();
@@ -323,13 +435,14 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setTitle("JPOS Sample Application");
         setBackground(new java.awt.Color(204, 204, 204));
-        setResizable(false);
 
-        scnPanelCommonMethods.setBorder(javax.swing.BorderFactory.createTitledBorder(""));
+        scnPanelCommonMethods.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createEtchedBorder()));
         scnPanelCommonMethods.setPreferredSize(new java.awt.Dimension(100, 30));
 
+        lblDeviceType.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblDeviceType.setText("Device Type :");
 
+        cmbDeviceCategory.setFont(new java.awt.Font("Tahoma", 1, 12)); // NOI18N
         cmbDeviceCategory.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "Scanner", "Scale" }));
         cmbDeviceCategory.setPreferredSize(new java.awt.Dimension(153, 28));
         cmbDeviceCategory.addActionListener(new java.awt.event.ActionListener() {
@@ -338,13 +451,20 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        lblLogicalName.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblLogicalName.setText("Logical Device Name :");
 
-        cmbLogicalDevice.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "ZebraScannerSerial", "ZebraScannerUSB", "ZebraUSBTableTop", "ZebraUSBHandHeld", "ZebraUSBOPOS", "ZebraScannerSNAPI", "ZebraAllScanners114", "ZebraAllScanners" }));
-        cmbLogicalDevice.setFocusable(false);
+        cmbLogicalDevice.setEditable(true);
+        cmbLogicalDevice.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         cmbLogicalDevice.setPreferredSize(new java.awt.Dimension(153, 28));
+        cmbLogicalDevice.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                cmbLogicalDeviceActionPerformed(evt);
+            }
+        });
 
         btnOpen.setBackground(javax.swing.UIManager.getDefaults().getColor("Button.light"));
+        btnOpen.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnOpen.setText("Open");
         btnOpen.setActionCommand("open");
         btnOpen.setAlignmentX(0.5F);
@@ -358,12 +478,21 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
-        lblClaimTimeout.setText("Claim Timeout (ms)");
+        lblClaimTimeout.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblClaimTimeout.setText("Claim Timeout (ms) :");
         lblClaimTimeout.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
 
+        txtClaimTimeout.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        txtClaimTimeout.setHorizontalAlignment(javax.swing.JTextField.CENTER);
         txtClaimTimeout.setText("1000");
+        txtClaimTimeout.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                txtClaimTimeoutActionPerformed(evt);
+            }
+        });
 
         btnClaim.setBackground(javax.swing.UIManager.getDefaults().getColor("Button.light"));
+        btnClaim.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnClaim.setText("Claim");
         btnClaim.setActionCommand("");
         btnClaim.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
@@ -377,6 +506,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         });
 
         btnRelease.setBackground(javax.swing.UIManager.getDefaults().getColor("Button.light"));
+        btnRelease.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnRelease.setText("Release");
         btnRelease.setActionCommand("");
         btnRelease.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
@@ -390,6 +520,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         });
 
         btnClose.setBackground(javax.swing.UIManager.getDefaults().getColor("Button.light"));
+        btnClose.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnClose.setText("Close");
         btnClose.setActionCommand("");
         btnClose.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
@@ -402,6 +533,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        btnFastMode.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnFastMode.setText("Fast Mode");
         btnFastMode.setPreferredSize(new java.awt.Dimension(120, 30));
         btnFastMode.addActionListener(new java.awt.event.ActionListener() {
@@ -410,6 +542,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        lblDeviceInfo.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblDeviceInfo.setText("Device Information :");
 
         txtDeviceInfo.setColumns(20);
@@ -423,39 +556,32 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         scnPanelCommonMethods.setLayout(scnPanelCommonMethodsLayout);
         scnPanelCommonMethodsLayout.setHorizontalGroup(
             scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, scnPanelCommonMethodsLayout.createSequentialGroup()
-                .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addGroup(javax.swing.GroupLayout.Alignment.LEADING, scnPanelCommonMethodsLayout.createSequentialGroup()
-                        .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
-                                .addGap(12, 12, 12)
-                                .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(lblDeviceInfo)
-                                    .addComponent(lblLogicalName)
-                                    .addComponent(lblDeviceType)
-                                    .addComponent(btnClaim, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, 198, Short.MAX_VALUE)
-                                    .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
-                                        .addComponent(lblClaimTimeout)
-                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                        .addComponent(txtClaimTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, 81, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                            .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
-                                .addContainerGap()
-                                .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                    .addComponent(btnFastMode, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, 200, Short.MAX_VALUE)
-                                    .addComponent(btnClose, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(btnRelease, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))))
-                        .addGap(0, 0, Short.MAX_VALUE))
+            .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
+                .addGap(7, 7, 7)
+                .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
-                        .addContainerGap()
-                        .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                            .addComponent(jScrollPane5, javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(javax.swing.GroupLayout.Alignment.LEADING, scnPanelCommonMethodsLayout.createSequentialGroup()
-                                .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                    .addComponent(cmbDeviceCategory, javax.swing.GroupLayout.Alignment.LEADING, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(cmbLogicalDevice, javax.swing.GroupLayout.Alignment.LEADING, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(btnOpen, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, 200, Short.MAX_VALUE))
-                                .addGap(0, 4, Short.MAX_VALUE)))))
-                .addContainerGap())
+                        .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(jScrollPane5)
+                            .addComponent(cmbDeviceCategory, 0, 210, Short.MAX_VALUE)
+                            .addComponent(cmbLogicalDevice, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(btnOpen, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(btnClaim, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(btnRelease, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(btnClose, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(btnFastMode, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
+                                .addComponent(lblDeviceType)
+                                .addGap(75, 134, Short.MAX_VALUE))
+                            .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
+                                .addComponent(lblClaimTimeout, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(txtClaimTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, 71, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addGap(7, 7, 7))
+                    .addGroup(scnPanelCommonMethodsLayout.createSequentialGroup()
+                        .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(lblLogicalName)
+                            .addComponent(lblDeviceInfo))
+                        .addGap(0, 0, Short.MAX_VALUE))))
         );
         scnPanelCommonMethodsLayout.setVerticalGroup(
             scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -472,8 +598,8 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 .addComponent(btnOpen, javax.swing.GroupLayout.PREFERRED_SIZE, 30, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(scnPanelCommonMethodsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(lblClaimTimeout)
-                    .addComponent(txtClaimTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(txtClaimTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, 20, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(lblClaimTimeout))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(btnClaim, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
@@ -482,19 +608,21 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 .addComponent(btnClose, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(btnFastMode, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(41, 41, 41)
+                .addGap(30, 30, 30)
                 .addComponent(lblDeviceInfo)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(jScrollPane5, javax.swing.GroupLayout.PREFERRED_SIZE, 279, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(43, Short.MAX_VALUE))
+                .addComponent(jScrollPane5)
+                .addGap(38, 38, 38))
         );
 
         jTabbedPane.setBackground(new java.awt.Color(204, 204, 204));
         jTabbedPane.setBorder(javax.swing.BorderFactory.createEtchedBorder());
 
-        scnPanelDataEvent.setBorder(javax.swing.BorderFactory.createTitledBorder("Data Event :"));
-        scnPanelDataEvent.setPreferredSize(new java.awt.Dimension(480, 99));
+        scnPanelDataEvent.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Data Event ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        scnPanelDataEvent.setPreferredSize(new java.awt.Dimension(489, 99));
+        scnPanelDataEvent.setVerifyInputWhenFocusTarget(false);
 
+        chkScnDeviceEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnDeviceEnable.setText("Device Enable");
         chkScnDeviceEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -502,20 +630,25 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        chkScnDataEventEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnDataEventEnable.setText("Data Event Enable");
+        chkScnDataEventEnable.setMargin(new java.awt.Insets(2, -1, 2, 2));
         chkScnDataEventEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkScnDataEventEnableActionPerformed(evt);
             }
         });
 
+        chkScnAutoDataEventEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnAutoDataEventEnable.setText("Auto Data Event Enable");
+        chkScnAutoDataEventEnable.setMargin(new java.awt.Insets(2, -2, 2, 2));
         chkScnAutoDataEventEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkScnAutoDataEventEnableActionPerformed(evt);
             }
         });
 
+        chkScnFreezeEvents.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnFreezeEvents.setText("Freeze Events");
         chkScnFreezeEvents.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -523,17 +656,40 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        chkScnAutoDisable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnAutoDisable.setText("Auto Disable");
+        chkScnAutoDisable.setMargin(new java.awt.Insets(2, -1, 2, 2));
         chkScnAutoDisable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkScnAutoDisableActionPerformed(evt);
             }
         });
 
+        chkScnAutoDeviceEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnAutoDeviceEnable.setText("Auto Device Enable");
+        chkScnAutoDeviceEnable.setMargin(new java.awt.Insets(2, -2, 2, 2));
         chkScnAutoDeviceEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkScnAutoDeviceEnableActionPerformed(evt);
+            }
+        });
+
+        chkScnPowerNotify.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        chkScnPowerNotify.setText("Power Notify");
+        chkScnPowerNotify.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                chkScnPowerNotifyActionPerformed(evt);
+            }
+        });
+
+        txtScnPowerState.setEditable(false);
+        txtScnPowerState.setFocusable(false);
+
+        btnScnPowerState.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnPowerState.setText("Power State");
+        btnScnPowerState.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnPowerStateActionPerformed(evt);
             }
         });
 
@@ -545,39 +701,52 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 .addContainerGap()
                 .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(chkScnDeviceEnable)
-                    .addComponent(chkScnFreezeEvents))
-                .addGap(50, 50, 50)
-                .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(chkScnFreezeEvents)
+                    .addComponent(chkScnPowerNotify))
+                .addGap(25, 25, 25)
+                .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
                     .addComponent(chkScnAutoDisable)
-                    .addComponent(chkScnDataEventEnable))
-                .addGap(45, 45, 45)
+                    .addComponent(chkScnDataEventEnable, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(btnScnPowerState, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addGap(25, 25, 25)
                 .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(chkScnAutoDeviceEnable)
                     .addComponent(chkScnAutoDataEventEnable)
-                    .addComponent(chkScnAutoDeviceEnable))
-                .addGap(10, 10, 10))
+                    .addComponent(txtScnPowerState, javax.swing.GroupLayout.PREFERRED_SIZE, 144, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addContainerGap(42, Short.MAX_VALUE))
         );
         scnPanelDataEventLayout.setVerticalGroup(
             scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scnPanelDataEventLayout.createSequentialGroup()
-                .addGap(16, 16, 16)
-                .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(chkScnDeviceEnable)
-                    .addComponent(chkScnDataEventEnable)
-                    .addComponent(chkScnAutoDataEventEnable))
+                .addGap(0, 0, 0)
+                .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(chkScnAutoDataEventEnable, javax.swing.GroupLayout.PREFERRED_SIZE, 23, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(chkScnDeviceEnable)
+                        .addComponent(chkScnDataEventEnable)))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(chkScnFreezeEvents)
                     .addComponent(chkScnAutoDisable)
                     .addComponent(chkScnAutoDeviceEnable))
-                .addContainerGap(17, Short.MAX_VALUE))
+                .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(scnPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(txtScnPowerState, javax.swing.GroupLayout.PREFERRED_SIZE, 27, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(btnScnPowerState, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addGroup(scnPanelDataEventLayout.createSequentialGroup()
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(chkScnPowerNotify))))
         );
 
-        scnPanelRecData.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Barcode Scanning :"));
+        scnPanelRecData.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Barcode Scanning ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
         scnPanelRecData.setAlignmentX(1.0F);
-        scnPanelRecData.setPreferredSize(new java.awt.Dimension(480, 263));
+        scnPanelRecData.setPreferredSize(new java.awt.Dimension(488, 262));
 
+        lblScanDataLabel.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblScanDataLabel.setText("Scan Data Label");
         lblScanDataLabel.setAlignmentX(0.5F);
+
+        jScrollPane3.setAutoscrolls(true);
 
         txtScanDataLabel.setEditable(false);
         txtScanDataLabel.setColumns(20);
@@ -588,6 +757,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         jScrollPane3.setViewportView(txtScanDataLabel);
 
         buttonGroup1.add(scanDataText);
+        scanDataText.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         scanDataText.setText("Text View");
         scanDataText.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -595,6 +765,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        lblScanData.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblScanData.setText("Scan Data");
 
         txtScanData.setEditable(false);
@@ -603,16 +774,21 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         txtScanData.setPreferredSize(new java.awt.Dimension(0, 30));
         jScrollPane6.setViewportView(txtScanData);
 
+        lblScanDataType.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblScanDataType.setText("Scan Data Type");
 
         txtScanDataType.setEditable(false);
+        txtScanDataType.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         txtScanDataType.setPreferredSize(new java.awt.Dimension(0, 30));
 
+        lblDataCount.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblDataCount.setText("Data Count");
 
         txtDataCount.setEditable(false);
+        txtDataCount.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         txtDataCount.setPreferredSize(new java.awt.Dimension(0, 30));
 
+        btnClearInput.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnClearInput.setText("Clear Input");
         btnClearInput.setPreferredSize(new java.awt.Dimension(100, 30));
         btnClearInput.addActionListener(new java.awt.event.ActionListener() {
@@ -621,7 +797,9 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        chkScnDecodeData.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkScnDecodeData.setText("Decode Data");
+        chkScnDecodeData.setMargin(new java.awt.Insets(2, -2, 2, 2));
         chkScnDecodeData.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkScnDecodeDataActionPerformed(evt);
@@ -629,6 +807,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         });
 
         buttonGroup1.add(scanDataHex);
+        scanDataHex.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         scanDataHex.setText("Hex View");
         scanDataHex.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -641,35 +820,28 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         scnPanelRecDataLayout.setHorizontalGroup(
             scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scnPanelRecDataLayout.createSequentialGroup()
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                .addGap(12, 12, 12)
+                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(lblScanDataType)
+                    .addComponent(lblDataCount)
+                    .addComponent(lblScanDataLabel)
+                    .addComponent(lblScanData))
+                .addGap(12, 12, 12)
+                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(scnPanelRecDataLayout.createSequentialGroup()
-                        .addComponent(chkScnDecodeData, javax.swing.GroupLayout.PREFERRED_SIZE, 123, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(36, 36, 36)
+                        .addComponent(txtDataCount, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addComponent(btnClearInput, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(txtScanDataType, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(jScrollPane6)
+                    .addComponent(jScrollPane3)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, scnPanelRecDataLayout.createSequentialGroup()
+                        .addComponent(chkScnDecodeData)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 100, Short.MAX_VALUE)
                         .addComponent(scanDataText)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(scanDataHex))
-                    .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                        .addGroup(scnPanelRecDataLayout.createSequentialGroup()
-                            .addComponent(lblDataCount)
-                            .addGap(40, 40, 40)
-                            .addComponent(txtDataCount, javax.swing.GroupLayout.PREFERRED_SIZE, 162, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                            .addComponent(btnClearInput, javax.swing.GroupLayout.PREFERRED_SIZE, 158, javax.swing.GroupLayout.PREFERRED_SIZE))
-                        .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(scnPanelRecDataLayout.createSequentialGroup()
-                                .addComponent(lblScanDataLabel)
-                                .addGap(18, 18, 18)
-                                .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 352, javax.swing.GroupLayout.PREFERRED_SIZE))
-                            .addGroup(scnPanelRecDataLayout.createSequentialGroup()
-                                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(lblScanData)
-                                    .addComponent(lblScanDataType))
-                                .addGap(18, 18, 18)
-                                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                    .addComponent(txtScanDataType, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(jScrollPane6, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 353, javax.swing.GroupLayout.PREFERRED_SIZE))))))
-                .addContainerGap(15, Short.MAX_VALUE))
+                        .addGap(3, 3, 3)
+                        .addComponent(scanDataHex)))
+                .addGap(10, 10, 10))
         );
         scnPanelRecDataLayout.setVerticalGroup(
             scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -678,218 +850,34 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                     .addComponent(scanDataHex)
                     .addComponent(scanDataText)
                     .addComponent(chkScnDecodeData))
-                .addGap(8, 8, 8)
+                .addGap(4, 4, 4)
                 .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(lblScanDataLabel)
-                    .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 75, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(8, 8, 8)
-                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(scnPanelRecDataLayout.createSequentialGroup()
-                        .addComponent(jScrollPane6, javax.swing.GroupLayout.PREFERRED_SIZE, 53, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(8, 8, 8)
-                        .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(lblScanDataType)
-                            .addComponent(txtScanDataType, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(lblDataCount)
-                            .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                                .addComponent(txtDataCount, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addComponent(btnClearInput, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                    .addComponent(lblScanData))
-                .addGap(4, 5, Short.MAX_VALUE))
-        );
-
-        scnPanelProperties.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Properties :"));
-        scnPanelProperties.setPreferredSize(new java.awt.Dimension(480, 147));
-
-        cmbScnProperties.setPreferredSize(new java.awt.Dimension(153, 30));
-        cmbScnProperties.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                cmbScnPropertiesActionPerformed(evt);
-            }
-        });
-
-        lblScnPropertyValue.setText("Property Value ");
-
-        txtScnPropertyValue.setHorizontalAlignment(javax.swing.JTextField.CENTER);
-        txtScnPropertyValue.setPreferredSize(new java.awt.Dimension(20, 30));
-
-        btnScnProperties.setText("Set Properties");
-        btnScnProperties.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnScnProperties.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnScnPropertiesActionPerformed(evt);
-            }
-        });
-
-        btnScnClearInputProperties.setText("Clear Input Properties");
-        btnScnClearInputProperties.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnScnClearInputProperties.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnScnClearInputPropertiesActionPerformed(evt);
-            }
-        });
-
-        javax.swing.GroupLayout scnPanelPropertiesLayout = new javax.swing.GroupLayout(scnPanelProperties);
-        scnPanelProperties.setLayout(scnPanelPropertiesLayout);
-        scnPanelPropertiesLayout.setHorizontalGroup(
-            scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(scnPanelPropertiesLayout.createSequentialGroup()
-                .addGap(32, 32, 32)
-                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addGroup(scnPanelPropertiesLayout.createSequentialGroup()
-                        .addComponent(lblScnPropertyValue)
-                        .addGap(18, 18, 18)
-                        .addComponent(txtScnPropertyValue, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                    .addComponent(cmbScnProperties, 0, 249, Short.MAX_VALUE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 18, Short.MAX_VALUE)
-                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(btnScnClearInputProperties, javax.swing.GroupLayout.DEFAULT_SIZE, 155, Short.MAX_VALUE)
-                    .addComponent(btnScnProperties, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                .addGap(18, 18, 18))
-        );
-        scnPanelPropertiesLayout.setVerticalGroup(
-            scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(scnPanelPropertiesLayout.createSequentialGroup()
-                .addContainerGap(12, Short.MAX_VALUE)
-                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(cmbScnProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(btnScnClearInputProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(jScrollPane3, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(txtScnPropertyValue, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(btnScnProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(lblScnPropertyValue))
-                .addGap(5, 5, 5))
+                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(lblScanData)
+                    .addComponent(jScrollPane6, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(lblScanDataType)
+                    .addComponent(txtScanDataType, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(lblDataCount)
+                    .addGroup(scnPanelRecDataLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(btnClearInput, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(txtDataCount, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
 
-        scnPanelDirectIO.setBorder(javax.swing.BorderFactory.createTitledBorder("Direct IO :"));
-        scnPanelDirectIO.setPreferredSize(new java.awt.Dimension(485, 359));
-
-        lblScnCommand.setText("Command :");
-
-        cmbScnCommand.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "GET_SCANNERS", "RSM_ATTR_GETALL", "RSM_ATTR_GET", "RSM_ATTR_GETNEXT", "RSM_ATTR_SET", "RSM_ATTR_STORE" }));
-        cmbScnCommand.setPreferredSize(new java.awt.Dimension(153, 30));
-        cmbScnCommand.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                cmbScnCommandActionPerformed(evt);
-            }
-        });
-
-        btnScnExecute.setText("Execute");
-        btnScnExecute.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnScnExecute.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnScnExecuteActionPerformed(evt);
-            }
-        });
-
-        lblScnStatus.setText("Status :");
-
-        txtScnStatus.setEditable(false);
-        txtScnStatus.setPreferredSize(new java.awt.Dimension(100, 30));
-
-        btnScnClear.setText("Clear");
-        btnScnClear.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnScnClear.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnScnClearActionPerformed(evt);
-            }
-        });
-
-        lblScnInXml.setText("InXml :");
-
-        lblScnOutXml.setText("OutXml :");
-
-        txtScnOutXml.setEditable(false);
-        txtScnOutXml.setColumns(20);
-        txtScnOutXml.setRows(5);
-        txtScnOutXml.setPreferredSize(new java.awt.Dimension(160, 94));
-        txtScnOutXml.setSelectionColor(new java.awt.Color(153, 204, 255));
-        jScrollPane2.setViewportView(txtScnOutXml);
-
-        txtScnInxml.setColumns(20);
-        txtScnInxml.setRows(5);
-        txtScnInxml.setPreferredSize(new java.awt.Dimension(160, 94));
-        jScrollPane4.setViewportView(txtScnInxml);
-
-        btnScnCopy.setText("Copy");
-        btnScnCopy.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnScnCopy.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnScnCopyActionPerformed(evt);
-            }
-        });
-
-        javax.swing.GroupLayout scnPanelDirectIOLayout = new javax.swing.GroupLayout(scnPanelDirectIO);
-        scnPanelDirectIO.setLayout(scnPanelDirectIOLayout);
-        scnPanelDirectIOLayout.setHorizontalGroup(
-            scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, scnPanelDirectIOLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                        .addComponent(lblScnStatus)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(txtScnStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(btnScnCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(btnScnClear, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                        .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addComponent(jScrollPane4, javax.swing.GroupLayout.PREFERRED_SIZE, 207, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(lblScnInXml)
-                            .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                                .addComponent(lblScnCommand)
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                .addComponent(cmbScnCommand, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)))
-                        .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                .addComponent(btnScnExecute, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE))
-                            .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                                .addGap(43, 43, 43)
-                                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(lblScnOutXml)
-                                    .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 207, javax.swing.GroupLayout.PREFERRED_SIZE))))))
-                .addGap(22, 22, 22))
-        );
-        scnPanelDirectIOLayout.setVerticalGroup(
-            scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                        .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                            .addComponent(lblScnCommand)
-                            .addComponent(cmbScnCommand, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(lblScnInXml)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(jScrollPane4, javax.swing.GroupLayout.PREFERRED_SIZE, 248, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
-                        .addComponent(btnScnExecute, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(lblScnOutXml)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 248, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                .addGap(0, 6, Short.MAX_VALUE)
-                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                        .addComponent(btnScnCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(btnScnClear, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                        .addComponent(txtScnStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(lblScnStatus)))
-                .addGap(15, 15, 15))
-        );
-
-        scnPanelCheckHealth.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder("Check Health :")));
+        scnPanelCheckHealth.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Check Health ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
         scnPanelCheckHealth.setPreferredSize(new java.awt.Dimension(504, 89));
 
         checkHealthBtnGroup.add(scnInternalCH);
+        scnInternalCH.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         scnInternalCH.setText("Internal");
+        scnInternalCH.setMargin(new java.awt.Insets(2, -1, 2, 2));
         scnInternalCH.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 scnInternalCHActionPerformed(evt);
@@ -897,6 +885,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         });
 
         checkHealthBtnGroup.add(scnExternalCH);
+        scnExternalCH.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         scnExternalCH.setText("External");
         scnExternalCH.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -905,6 +894,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         });
 
         checkHealthBtnGroup.add(scnInteractiveCH);
+        scnInteractiveCH.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         scnInteractiveCH.setText("Interactive");
         scnInteractiveCH.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -912,6 +902,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        btnScnCheckHealth.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnScnCheckHealth.setText("Check Health");
         btnScnCheckHealth.setAlignmentX(0.5F);
         btnScnCheckHealth.setPreferredSize(new java.awt.Dimension(100, 30));
@@ -921,11 +912,18 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
-        lblScnCheckHealthText.setText("Health Check Text :");
+        lblScnCheckHealthText.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblScnCheckHealthText.setText("HealthCheck Text  ");
 
         txtScnHealthCheckText.setPreferredSize(new java.awt.Dimension(100, 30));
+        txtScnHealthCheckText.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                txtScnHealthCheckTextActionPerformed(evt);
+            }
+        });
 
-        btnScnCheckHealthText.setText("Get Health Check Text");
+        btnScnCheckHealthText.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnCheckHealthText.setText("Health Check Text");
         btnScnCheckHealthText.setAlignmentX(0.5F);
         btnScnCheckHealthText.setPreferredSize(new java.awt.Dimension(100, 30));
         btnScnCheckHealthText.addActionListener(new java.awt.event.ActionListener() {
@@ -939,8 +937,8 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         scnPanelCheckHealthLayout.setHorizontalGroup(
             scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scnPanelCheckHealthLayout.createSequentialGroup()
-                .addGap(18, 18, 18)
-                .addGroup(scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                .addGap(10, 10, 10)
+                .addGroup(scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(scnPanelCheckHealthLayout.createSequentialGroup()
                         .addComponent(scnInternalCH)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
@@ -948,30 +946,293 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addComponent(scnInteractiveCH))
                     .addGroup(scnPanelCheckHealthLayout.createSequentialGroup()
-                        .addComponent(btnScnCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 131, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(42, 42, 42)
+                        .addComponent(btnScnCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 156, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(16, 16, 16)
                         .addComponent(lblScnCheckHealthText)))
-                .addGap(2, 2, 2)
-                .addGroup(scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(txtScnHealthCheckText, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                    .addComponent(btnScnCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 183, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(20, 20, 20))
+                .addGap(0, 0, 0)
+                .addGroup(scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(btnScnCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(txtScnHealthCheckText, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(10, 10, 10))
         );
         scnPanelCheckHealthLayout.setVerticalGroup(
             scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scnPanelCheckHealthLayout.createSequentialGroup()
-                .addContainerGap()
+                .addGap(1, 1, 1)
                 .addGroup(scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(scnInternalCH)
                     .addComponent(scnExternalCH)
                     .addComponent(scnInteractiveCH)
-                    .addComponent(btnScnCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                    .addComponent(btnScnCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(22, 22, 22)
                 .addGroup(scnPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(btnScnCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnScnCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(txtScnHealthCheckText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(lblScnCheckHealthText))
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
+
+        scnPanelStat.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Statistics ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        scnPanelStat.setPreferredSize(new java.awt.Dimension(503, 130));
+
+        lblScnStatistic.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+
+        btnScnRetreiveStat.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnRetreiveStat.setText("Retrieve Statistics");
+        btnScnRetreiveStat.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnRetreiveStatActionPerformed(evt);
+            }
+        });
+
+        btnScnResetStat.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnResetStat.setText("Reset Statistics");
+        btnScnResetStat.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnResetStatActionPerformed(evt);
+            }
+        });
+
+        txtScnStatOutput.setColumns(4);
+        txtScnStatOutput.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
+        txtScnStatOutput.setLineWrap(true);
+        txtScnStatOutput.setRows(5);
+        txtScnStatOutput.setWrapStyleWord(true);
+        jScrollPane1.setViewportView(txtScnStatOutput);
+
+        javax.swing.GroupLayout scnPanelStatLayout = new javax.swing.GroupLayout(scnPanelStat);
+        scnPanelStat.setLayout(scnPanelStatLayout);
+        scnPanelStatLayout.setHorizontalGroup(
+            scnPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(scnPanelStatLayout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(scnPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 458, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(scnPanelStatLayout.createSequentialGroup()
+                        .addComponent(lblScnStatistic, javax.swing.GroupLayout.PREFERRED_SIZE, 81, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(18, 18, 18)
+                        .addComponent(btnScnRetreiveStat, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(31, 31, 31)
+                        .addComponent(btnScnResetStat, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
+        scnPanelStatLayout.setVerticalGroup(
+            scnPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(scnPanelStatLayout.createSequentialGroup()
+                .addGap(4, 4, 4)
+                .addGroup(scnPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(lblScnStatistic, javax.swing.GroupLayout.PREFERRED_SIZE, 20, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnScnRetreiveStat, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnScnResetStat, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(7, 7, 7)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 67, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
+
+        scnPanelDirectIO.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Direct IO ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        scnPanelDirectIO.setPreferredSize(new java.awt.Dimension(485, 359));
+
+        cmbScnCommand.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        cmbScnCommand.setAutoscrolls(true);
+        cmbScnCommand.setPreferredSize(new java.awt.Dimension(153, 30));
+        cmbScnCommand.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                cmbScnCommandActionPerformed(evt);
+            }
+        });
+
+        btnScnExecute.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnExecute.setText("Execute");
+        btnScnExecute.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnScnExecute.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnExecuteActionPerformed(evt);
+            }
+        });
+
+        lblScnStatus.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblScnStatus.setText("Status ");
+
+        txtScnStatus.setEditable(false);
+        txtScnStatus.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        txtScnStatus.setPreferredSize(new java.awt.Dimension(100, 30));
+        txtScnStatus.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                txtScnStatusActionPerformed(evt);
+            }
+        });
+
+        btnScnClear.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnClear.setText("Clear");
+        btnScnClear.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnScnClear.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnClearActionPerformed(evt);
+            }
+        });
+
+        lblScnInXml.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblScnInXml.setText("InXml :");
+
+        lblScnOutXml.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblScnOutXml.setText("OutXml :");
+
+        jScrollPane2.setAutoscrolls(true);
+        jScrollPane2.setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
+
+        txtScnOutXml.setEditable(false);
+        txtScnOutXml.setColumns(100);
+        txtScnOutXml.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
+        txtScnOutXml.setRows(50);
+        txtScnOutXml.setSelectionColor(new java.awt.Color(153, 204, 255));
+	txtScnOutXml.setWrapStyleWord(true);
+        txtScnOutXml.setLineWrap(true);	
+        jScrollPane2.setViewportView(txtScnOutXml);
+
+        jScrollPane4.setAutoscrolls(true);
+
+        txtScnInxml.setColumns(100);
+        txtScnInxml.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
+        txtScnInxml.setRows(50);
+        txtScnInxml.setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
+        jScrollPane4.setViewportView(txtScnInxml);
+
+        btnScnCopy.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnCopy.setText("Copy");
+        btnScnCopy.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnScnCopy.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnCopyActionPerformed(evt);
+            }
+        });
+
+        lblScnCommand.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblScnCommand.setText("Command ");
+
+        javax.swing.GroupLayout scnPanelDirectIOLayout = new javax.swing.GroupLayout(scnPanelDirectIO);
+        scnPanelDirectIO.setLayout(scnPanelDirectIOLayout);
+        scnPanelDirectIOLayout.setHorizontalGroup(
+            scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, scnPanelDirectIOLayout.createSequentialGroup()
+                .addGap(10, 10, 10)
+                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
+                        .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                            .addGroup(javax.swing.GroupLayout.Alignment.LEADING, scnPanelDirectIOLayout.createSequentialGroup()
+                                .addComponent(lblScnCommand)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(cmbScnCommand, 0, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                            .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addComponent(lblScnInXml)
+                                .addComponent(jScrollPane4, javax.swing.GroupLayout.PREFERRED_SIZE, 225, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addGap(10, 10, 10)
+                        .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(lblScnOutXml)
+                            .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addComponent(btnScnExecute, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addComponent(jScrollPane2, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 225, javax.swing.GroupLayout.PREFERRED_SIZE))))
+                    .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
+                        .addComponent(lblScnStatus)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(txtScnStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 81, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addComponent(btnScnCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 87, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(btnScnClear, javax.swing.GroupLayout.PREFERRED_SIZE, 87, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addGap(10, 10, 10))
+        );
+        scnPanelDirectIOLayout.setVerticalGroup(
+            scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(scnPanelDirectIOLayout.createSequentialGroup()
+                .addGap(2, 2, 2)
+                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(cmbScnCommand, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(lblScnCommand)
+                    .addComponent(btnScnExecute, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(6, 6, 6)
+                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(lblScnInXml)
+                    .addComponent(lblScnOutXml))
+                .addGap(0, 0, 0)
+                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                    .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 179, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jScrollPane4, javax.swing.GroupLayout.PREFERRED_SIZE, 179, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(6, 6, 6)
+                .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(btnScnCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(btnScnClear, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addGroup(scnPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(txtScnStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 20, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(lblScnStatus))))
+        );
+
+        scnPanelProperties.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Properties ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        scnPanelProperties.setPreferredSize(new java.awt.Dimension(480, 147));
+
+        cmbScnProperties.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        cmbScnProperties.setPreferredSize(new java.awt.Dimension(153, 30));
+        cmbScnProperties.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                cmbScnPropertiesActionPerformed(evt);
+            }
+        });
+
+        lblScnPropertyValue.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblScnPropertyValue.setText("Property Value ");
+
+        txtScnPropertyValue.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        txtScnPropertyValue.setHorizontalAlignment(javax.swing.JTextField.CENTER);
+        txtScnPropertyValue.setPreferredSize(new java.awt.Dimension(20, 30));
+
+        btnScnProperties.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnProperties.setText("Set Properties");
+        btnScnProperties.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnScnProperties.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnPropertiesActionPerformed(evt);
+            }
+        });
+
+        btnScnClearInputProperties.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnScnClearInputProperties.setText("Clear Input Properties");
+        btnScnClearInputProperties.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnScnClearInputProperties.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnScnClearInputPropertiesActionPerformed(evt);
+            }
+        });
+
+        javax.swing.GroupLayout scnPanelPropertiesLayout = new javax.swing.GroupLayout(scnPanelProperties);
+        scnPanelProperties.setLayout(scnPanelPropertiesLayout);
+        scnPanelPropertiesLayout.setHorizontalGroup(
+            scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(scnPanelPropertiesLayout.createSequentialGroup()
+                .addGap(10, 10, 10)
+                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addGroup(scnPanelPropertiesLayout.createSequentialGroup()
+                        .addComponent(lblScnPropertyValue)
+                        .addGap(4, 4, 4)
+                        .addComponent(txtScnPropertyValue, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addComponent(cmbScnProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 224, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(btnScnClearInputProperties, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnScnProperties, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(10, 10, 10))
+        );
+        scnPanelPropertiesLayout.setVerticalGroup(
+            scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(scnPanelPropertiesLayout.createSequentialGroup()
+                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(cmbScnProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnScnClearInputProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(6, 6, 6)
+                .addGroup(scnPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(txtScnPropertyValue, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnScnProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(lblScnPropertyValue))
+                .addGap(0, 0, 0))
         );
 
         javax.swing.GroupLayout scannerPanelLayout = new javax.swing.GroupLayout(scannerPanel);
@@ -979,40 +1240,46 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         scannerPanelLayout.setHorizontalGroup(
             scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scannerPanelLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(scnPanelDataEvent, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(scnPanelProperties, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(scnPanelRecData, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(6, 6, 6)
+                .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                    .addComponent(scnPanelRecData, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(scnPanelDataEvent, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(scnPanelStat, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(scnPanelCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 503, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(scnPanelDirectIO, javax.swing.GroupLayout.PREFERRED_SIZE, 503, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(12, 12, 12))
+                .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(scnPanelProperties, javax.swing.GroupLayout.DEFAULT_SIZE, 488, Short.MAX_VALUE)
+                    .addComponent(scnPanelCheckHealth, javax.swing.GroupLayout.DEFAULT_SIZE, 488, Short.MAX_VALUE)
+                    .addComponent(scnPanelDirectIO, javax.swing.GroupLayout.DEFAULT_SIZE, 488, Short.MAX_VALUE))
+                .addGap(11, 11, 11))
         );
         scannerPanelLayout.setVerticalGroup(
             scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scannerPanelLayout.createSequentialGroup()
+                .addGap(6, 6, 6)
                 .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(scnPanelCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 102, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(scnPanelDataEvent, 102, 102, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(scnPanelDataEvent, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(scnPanelCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                .addGroup(scannerPanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(scannerPanelLayout.createSequentialGroup()
-                        .addComponent(scnPanelRecData, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(scnPanelProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 95, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(scnPanelProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 100, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addComponent(scnPanelDirectIO, javax.swing.GroupLayout.PREFERRED_SIZE, 374, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(5, 5, 5))
+                        .addComponent(scnPanelDirectIO, javax.swing.GroupLayout.PREFERRED_SIZE, 291, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addGroup(scannerPanelLayout.createSequentialGroup()
+                        .addComponent(scnPanelRecData, javax.swing.GroupLayout.PREFERRED_SIZE, 253, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(6, 6, 6)
+                        .addComponent(scnPanelStat, javax.swing.GroupLayout.PREFERRED_SIZE, 133, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addGap(4, 4, 4))
         );
 
         scnPanelCheckHealth.getAccessibleContext().setAccessibleDescription("");
 
         jTabbedPane.addTab("", scannerPanel);
 
-        sclPanelDataEvent.setBorder(javax.swing.BorderFactory.createTitledBorder("Data Event :"));
+        sclPanelDataEvent.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Data Event ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
         sclPanelDataEvent.setPreferredSize(new java.awt.Dimension(480, 99));
 
+        chkSclDeviceEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclDeviceEnable.setText("Device Enable");
         chkSclDeviceEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -1020,13 +1287,16 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        chkSclDataEventEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclDataEventEnable.setText("Data Event Enable");
+        chkSclDataEventEnable.setMargin(new java.awt.Insets(2, -1, 2, 2));
         chkSclDataEventEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkSclDataEventEnableActionPerformed(evt);
             }
         });
 
+        chkSclFreezeEvents.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclFreezeEvents.setText("Freeze Events");
         chkSclFreezeEvents.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -1034,24 +1304,51 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        chkSclAutoDeviceEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclAutoDeviceEnable.setText("Auto Device Enable");
+        chkSclAutoDeviceEnable.setMargin(new java.awt.Insets(2, -2, 2, 2));
         chkSclAutoDeviceEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkSclAutoDeviceEnableActionPerformed(evt);
             }
         });
 
+        chkSclAutoDisable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclAutoDisable.setText("Auto Disable");
+        chkSclAutoDisable.setMargin(new java.awt.Insets(2, -1, 2, 2));
         chkSclAutoDisable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkSclAutoDisableActionPerformed(evt);
             }
         });
 
+        chkSclAutoDataEventEnable.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclAutoDataEventEnable.setText("Auto Data Event Enable");
+        chkSclAutoDataEventEnable.setMargin(new java.awt.Insets(2, -2, 2, 2));
         chkSclAutoDataEventEnable.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkSclAutoDataEventEnableActionPerformed(evt);
+            }
+        });
+
+        chkSclPowerNotify.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        chkSclPowerNotify.setText("Power Notify");
+        chkSclPowerNotify.setMargin(new java.awt.Insets(1, 2, 2, 2));
+        chkSclPowerNotify.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                chkSclPowerNotifyActionPerformed(evt);
+            }
+        });
+
+        txtSclPowerState.setEditable(false);
+        txtSclPowerState.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        txtSclPowerState.setRequestFocusEnabled(false);
+
+        btnSclPowerState.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnSclPowerState.setText("Power State");
+        btnSclPowerState.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnSclPowerStateActionPerformed(evt);
             }
         });
 
@@ -1063,131 +1360,59 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 .addContainerGap()
                 .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(chkSclDeviceEnable)
-                    .addComponent(chkSclFreezeEvents))
-                .addGap(50, 50, 50)
+                    .addComponent(chkSclFreezeEvents)
+                    .addComponent(chkSclPowerNotify))
+                .addGap(25, 25, 25)
+                .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(chkSclAutoDisable)
+                    .addComponent(chkSclDataEventEnable, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(btnSclPowerState, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addGap(25, 25, 25)
                 .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(chkSclDataEventEnable)
-                    .addComponent(chkSclAutoDisable))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 45, Short.MAX_VALUE)
-                .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(chkSclAutoDataEventEnable)
-                    .addComponent(chkSclAutoDeviceEnable))
-                .addGap(16, 16, 16))
+                    .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                        .addComponent(txtSclPowerState, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 115, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(chkSclAutoDeviceEnable, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addComponent(chkSclAutoDataEventEnable))
+                .addContainerGap(42, Short.MAX_VALUE))
         );
         sclPanelDataEventLayout.setVerticalGroup(
             sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(sclPanelDataEventLayout.createSequentialGroup()
-                .addGap(16, 16, 16)
-                .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(chkSclDeviceEnable)
-                    .addComponent(chkSclDataEventEnable)
-                    .addComponent(chkSclAutoDataEventEnable))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGap(0, 0, 0)
+                .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(chkSclAutoDataEventEnable, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 23, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(chkSclDeviceEnable)
+                        .addComponent(chkSclDataEventEnable)))
+                .addGap(0, 0, 0)
                 .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(chkSclFreezeEvents)
                     .addComponent(chkSclAutoDisable)
                     .addComponent(chkSclAutoDeviceEnable))
-                .addContainerGap(17, Short.MAX_VALUE))
-        );
-
-        sclPanelCheckHealth.setBorder(javax.swing.BorderFactory.createTitledBorder("Check Health :"));
-
-        checkHealthBtnGroup.add(sclInternal);
-        sclInternal.setText("Internal");
-        sclInternal.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                sclInternalActionPerformed(evt);
-            }
-        });
-
-        checkHealthBtnGroup.add(sclExternal);
-        sclExternal.setText("External");
-        sclExternal.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                sclExternalActionPerformed(evt);
-            }
-        });
-
-        checkHealthBtnGroup.add(sclInteractive);
-        sclInteractive.setText("Interactive");
-        sclInteractive.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                sclInteractiveActionPerformed(evt);
-            }
-        });
-
-        btnSclCheckHealth.setText("Check Health");
-        btnSclCheckHealth.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnSclCheckHealth.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnSclCheckHealthActionPerformed(evt);
-            }
-        });
-
-        lblSclCHText.setText("Health Check Text :");
-
-        txtSclCheckHealthText.setPreferredSize(new java.awt.Dimension(100, 30));
-
-        btnSclCHText.setText("Get Health Check Text");
-        btnSclCHText.setAlignmentX(0.5F);
-        btnSclCHText.setPreferredSize(new java.awt.Dimension(100, 30));
-        btnSclCHText.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                btnSclCHTextActionPerformed(evt);
-            }
-        });
-
-        javax.swing.GroupLayout sclPanelCheckHealthLayout = new javax.swing.GroupLayout(sclPanelCheckHealth);
-        sclPanelCheckHealth.setLayout(sclPanelCheckHealthLayout);
-        sclPanelCheckHealthLayout.setHorizontalGroup(
-            sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(sclPanelCheckHealthLayout.createSequentialGroup()
-                .addGap(18, 18, 18)
-                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(sclPanelCheckHealthLayout.createSequentialGroup()
-                        .addComponent(btnSclCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 131, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(42, 42, 42)
-                        .addComponent(lblSclCHText, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                    .addGroup(sclPanelCheckHealthLayout.createSequentialGroup()
-                        .addComponent(sclInternal)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(sclExternal)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(sclInteractive)
-                        .addGap(63, 63, 63)))
                 .addGap(0, 0, 0)
-                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(btnSclCHText, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                    .addComponent(txtSclCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 183, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(20, 20, 20))
-        );
-        sclPanelCheckHealthLayout.setVerticalGroup(
-            sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelCheckHealthLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(btnSclCHText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(sclInternal)
-                    .addComponent(sclExternal)
-                    .addComponent(sclInteractive))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(txtSclCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(lblSclCHText)
-                    .addComponent(btnSclCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(chkSclPowerNotify, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 23, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(sclPanelDataEventLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(txtSclPowerState, javax.swing.GroupLayout.PREFERRED_SIZE, 27, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(btnSclPowerState, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addContainerGap(12, Short.MAX_VALUE))
         );
 
-        sclPanelScaleWeight.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Scale Weight :"));
+        sclPanelScaleWeight.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Scale Weight ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
         sclPanelScaleWeight.setPreferredSize(new java.awt.Dimension(480, 391));
 
+        lblSclReadWeght.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblSclReadWeght.setText("Timeout (ms) :");
 
+        txtSclRWTimeout.setFont(new java.awt.Font("Ubuntu", 0, 12)); // NOI18N
+        txtSclRWTimeout.setHorizontalAlignment(javax.swing.JTextField.CENTER);
         txtSclRWTimeout.setText("1000");
 
         txtSclDisplayWeight.setEditable(false);
+        txtSclDisplayWeight.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         txtSclDisplayWeight.setPreferredSize(new java.awt.Dimension(100, 28));
 
+        btnSclReadWeight.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclReadWeight.setText("Read Weight");
         btnSclReadWeight.setPreferredSize(new java.awt.Dimension(100, 30));
         btnSclReadWeight.addActionListener(new java.awt.event.ActionListener() {
@@ -1196,6 +1421,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        btnSclZeroScale.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclZeroScale.setText("Zero Scale");
         btnSclZeroScale.setPreferredSize(new java.awt.Dimension(100, 30));
         btnSclZeroScale.addActionListener(new java.awt.event.ActionListener() {
@@ -1204,6 +1430,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        btnSclClearInput.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclClearInput.setText("Clear Input");
         btnSclClearInput.setActionCommand("btnClearInput");
         btnSclClearInput.setPreferredSize(new java.awt.Dimension(100, 30));
@@ -1213,9 +1440,12 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
-        jLabel2.setText("Weigth :");
+        lblSclWeight.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblSclWeight.setText("Weigth :");
 
+        chkSclAsyncMode.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclAsyncMode.setText("Async Mode");
+        chkSclAsyncMode.setMargin(new java.awt.Insets(2, -1, 2, 2));
         chkSclAsyncMode.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 chkSclAsyncModeActionPerformed(evt);
@@ -1230,53 +1460,51 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 .addContainerGap()
                 .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(lblSclReadWeght)
-                    .addComponent(jLabel2))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                    .addComponent(lblSclWeight))
+                .addGap(16, 16, 16)
                 .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(sclPanelScaleWeightLayout.createSequentialGroup()
-                        .addComponent(txtSclRWTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, 81, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(116, 118, Short.MAX_VALUE))
-                    .addGroup(sclPanelScaleWeightLayout.createSequentialGroup()
-                        .addComponent(txtSclDisplayWeight, javax.swing.GroupLayout.DEFAULT_SIZE, 189, Short.MAX_VALUE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)))
+                    .addComponent(txtSclRWTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, 71, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(txtSclDisplayWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 162, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(30, 30, 30)
                 .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                        .addComponent(btnSclZeroScale, javax.swing.GroupLayout.DEFAULT_SIZE, 174, Short.MAX_VALUE)
-                        .addComponent(btnSclReadWeight, javax.swing.GroupLayout.DEFAULT_SIZE, 174, Short.MAX_VALUE)
-                        .addComponent(btnSclClearInput, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                    .addGroup(sclPanelScaleWeightLayout.createSequentialGroup()
-                        .addGap(26, 26, 26)
-                        .addComponent(chkSclAsyncMode)))
-                .addContainerGap())
+                    .addComponent(btnSclClearInput, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnSclZeroScale, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnSclReadWeight, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(chkSclAsyncMode, javax.swing.GroupLayout.PREFERRED_SIZE, 105, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(10, 10, 10))
         );
         sclPanelScaleWeightLayout.setVerticalGroup(
             sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(sclPanelScaleWeightLayout.createSequentialGroup()
+                .addGap(6, 6, 6)
                 .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(sclPanelScaleWeightLayout.createSequentialGroup()
-                        .addComponent(chkSclAsyncMode)
-                        .addGap(11, 11, 11))
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelScaleWeightLayout.createSequentialGroup()
+                        .addGap(29, 29, 29)
+                        .addComponent(btnSclReadWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 14, Short.MAX_VALUE)
+                        .addComponent(btnSclZeroScale, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addComponent(btnSclClearInput, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addGroup(sclPanelScaleWeightLayout.createSequentialGroup()
                         .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                            .addComponent(txtSclRWTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(lblSclReadWeght))
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)))
-                .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(txtSclDisplayWeight, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                        .addComponent(jLabel2)
-                        .addComponent(btnSclReadWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 15, Short.MAX_VALUE)
-                .addComponent(btnSclZeroScale, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addComponent(btnSclClearInput, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(txtSclRWTimeout, javax.swing.GroupLayout.PREFERRED_SIZE, 20, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(lblSclReadWeght)
+                            .addComponent(chkSclAsyncMode))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(sclPanelScaleWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(txtSclDisplayWeight, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(lblSclWeight))
+                        .addGap(78, 78, 78)))
                 .addContainerGap())
         );
 
-        sclPanelLiveWeight.setBorder(javax.swing.BorderFactory.createTitledBorder("Live Weight :"));
+        sclPanelLiveWeight.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Live Weight ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        sclPanelLiveWeight.setPreferredSize(new java.awt.Dimension(481, 73));
 
+        txtSclLiveWeight.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         txtSclLiveWeight.setPreferredSize(new java.awt.Dimension(100, 28));
 
+        chkSclEnableLiveWeight.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         chkSclEnableLiveWeight.setText("Enable Live Weight");
         chkSclEnableLiveWeight.setToolTipText("Enable Live Weight (before Device Enables) . This enables Status Notify Events.");
         chkSclEnableLiveWeight.addActionListener(new java.awt.event.ActionListener() {
@@ -1291,10 +1519,10 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             sclPanelLiveWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(sclPanelLiveWeightLayout.createSequentialGroup()
                 .addContainerGap()
-                .addComponent(txtSclLiveWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 280, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(26, 26, 26)
-                .addComponent(chkSclEnableLiveWeight)
-                .addContainerGap(35, Short.MAX_VALUE))
+                .addComponent(txtSclLiveWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 262, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(29, 29, 29)
+                .addComponent(chkSclEnableLiveWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 155, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(21, Short.MAX_VALUE))
         );
         sclPanelLiveWeightLayout.setVerticalGroup(
             sclPanelLiveWeightLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -1306,19 +1534,119 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 .addContainerGap(12, Short.MAX_VALUE))
         );
 
-        sclPanelDirectIO.setBorder(javax.swing.BorderFactory.createTitledBorder("Direct IO :"));
+        sclPanelCheckHealth.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Check Health ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        sclPanelCheckHealth.setPreferredSize(new java.awt.Dimension(480, 98));
+
+        checkHealthBtnGroup.add(sclInternal);
+        sclInternal.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        sclInternal.setText("Internal");
+        sclInternal.setMargin(new java.awt.Insets(2, -1, 2, 2));
+        sclInternal.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                sclInternalActionPerformed(evt);
+            }
+        });
+
+        checkHealthBtnGroup.add(sclExternal);
+        sclExternal.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        sclExternal.setText("External");
+        sclExternal.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                sclExternalActionPerformed(evt);
+            }
+        });
+
+        checkHealthBtnGroup.add(sclInteractive);
+        sclInteractive.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        sclInteractive.setText("Interactive");
+        sclInteractive.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                sclInteractiveActionPerformed(evt);
+            }
+        });
+
+        btnSclCheckHealth.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnSclCheckHealth.setText("Check Health");
+        btnSclCheckHealth.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnSclCheckHealth.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnSclCheckHealthActionPerformed(evt);
+            }
+        });
+
+        txtSclCheckHealthText.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        txtSclCheckHealthText.setPreferredSize(new java.awt.Dimension(100, 30));
+
+        btnSclCHText.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnSclCHText.setText("Health Check Text");
+        btnSclCHText.setAlignmentX(0.5F);
+        btnSclCHText.setPreferredSize(new java.awt.Dimension(100, 30));
+        btnSclCHText.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnSclCHTextActionPerformed(evt);
+            }
+        });
+
+        lblSclCHText.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblSclCHText.setText("HealthCheck Text  ");
+
+        javax.swing.GroupLayout sclPanelCheckHealthLayout = new javax.swing.GroupLayout(sclPanelCheckHealth);
+        sclPanelCheckHealth.setLayout(sclPanelCheckHealthLayout);
+        sclPanelCheckHealthLayout.setHorizontalGroup(
+            sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(sclPanelCheckHealthLayout.createSequentialGroup()
+                .addGap(10, 10, 10)
+                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(sclPanelCheckHealthLayout.createSequentialGroup()
+                        .addComponent(sclInternal)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(sclExternal)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(sclInteractive))
+                    .addGroup(sclPanelCheckHealthLayout.createSequentialGroup()
+                        .addComponent(btnSclCHText, javax.swing.GroupLayout.PREFERRED_SIZE, 156, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(16, 16, 16)
+                        .addComponent(lblSclCHText)))
+                .addGap(0, 0, 0)
+                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(btnSclCheckHealth, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(txtSclCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(10, 10, 10))
+        );
+        sclPanelCheckHealthLayout.setVerticalGroup(
+            sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelCheckHealthLayout.createSequentialGroup()
+                .addGap(1, 1, 1)
+                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(sclInternal)
+                    .addComponent(sclExternal)
+                    .addComponent(sclInteractive)
+                    .addComponent(btnSclCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(22, 22, 22)
+                .addGroup(sclPanelCheckHealthLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(txtSclCheckHealthText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnSclCHText, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(lblSclCHText))
+                .addGap(6, 6, 6))
+        );
+
+        sclPanelDirectIO.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Direct IO ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
         sclPanelDirectIO.setPreferredSize(new java.awt.Dimension(485, 359));
 
-        lblSclCommand.setText("Command :");
+        lblSclCommand.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblSclCommand.setText("Command ");
 
-        cmbSclCommand.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "GET_SCANNERS", "RSM_ATTR_GETALL", "RSM_ATTR_GET", "RSM_ATTR_GETNEXT", "RSM_ATTR_SET", "RSM_ATTR_STORE" }));
-        cmbSclCommand.setPreferredSize(new java.awt.Dimension(153, 30));
+        cmbSclCommand.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        cmbSclCommand.setAutoscrolls(true);
+        cmbSclCommand.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
+        cmbSclCommand.setPreferredSize(new java.awt.Dimension(153, 28));
         cmbSclCommand.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 cmbSclCommandActionPerformed(evt);
             }
         });
 
+        btnSclExecute.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclExecute.setText("Execute");
         btnSclExecute.setPreferredSize(new java.awt.Dimension(100, 30));
         btnSclExecute.addActionListener(new java.awt.event.ActionListener() {
@@ -1327,28 +1655,41 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        lblSclInXml.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblSclInXml.setText("InXml :");
 
+        lblSclOutXml.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblSclOutXml.setText("OutXml :");
 
-        txtSclInXml.setColumns(20);
-        txtSclInXml.setRows(5);
-        txtSclInXml.setCursor(new java.awt.Cursor(java.awt.Cursor.TEXT_CURSOR));
-        txtSclInXml.setPreferredSize(new java.awt.Dimension(160, 94));
+        jScrollPane8.setAutoscrolls(true);
+
+        txtSclInXml.setColumns(100);
+        txtSclInXml.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
+        txtSclInXml.setRows(50);
+        txtSclInXml.setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
         txtSclInXml.setSelectionColor(new java.awt.Color(153, 204, 255));
         jScrollPane8.setViewportView(txtSclInXml);
 
+        jScrollPane9.setAutoscrolls(true);
+
         txtSclOutXml.setEditable(false);
-        txtSclOutXml.setColumns(20);
-        txtSclOutXml.setRows(5);
+        txtSclOutXml.setColumns(100);
+        txtSclOutXml.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
+        txtSclOutXml.setRows(50);
+        txtSclOutXml.setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
         txtSclOutXml.setSelectionColor(new java.awt.Color(153, 204, 255));
+	txtSclOutXml.setWrapStyleWord(true);
+        txtSclOutXml.setLineWrap(true);
         jScrollPane9.setViewportView(txtSclOutXml);
 
-        lblSclStatus.setText("Status :");
+        lblSclStatus.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        lblSclStatus.setText("Status ");
 
         txtSclStatus.setEditable(false);
+        txtSclStatus.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         txtSclStatus.setPreferredSize(new java.awt.Dimension(100, 30));
 
+        btnSclClear.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclClear.setText("Clear");
         btnSclClear.setPreferredSize(new java.awt.Dimension(100, 30));
         btnSclClear.addActionListener(new java.awt.event.ActionListener() {
@@ -1357,6 +1698,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        btnSclCopy.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclCopy.setText("Copy");
         btnSclCopy.setPreferredSize(new java.awt.Dimension(100, 30));
         btnSclCopy.addActionListener(new java.awt.event.ActionListener() {
@@ -1370,64 +1712,130 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         sclPanelDirectIOLayout.setHorizontalGroup(
             sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(lblSclInXml)
-                    .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
-                        .addComponent(lblSclCommand)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(cmbSclCommand, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addComponent(jScrollPane8, javax.swing.GroupLayout.PREFERRED_SIZE, 207, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
                     .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
                         .addComponent(lblSclStatus)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(txtSclStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addComponent(txtSclStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 81, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                        .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelDirectIOLayout.createSequentialGroup()
+                            .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addComponent(lblSclInXml)
+                                .addComponent(lblSclCommand))
+                            .addGap(4, 4, 4)
+                            .addComponent(cmbSclCommand, javax.swing.GroupLayout.PREFERRED_SIZE, 163, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addComponent(jScrollPane8, javax.swing.GroupLayout.PREFERRED_SIZE, 225, javax.swing.GroupLayout.PREFERRED_SIZE)))
                 .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
-                        .addGap(43, 43, 43)
+                        .addGap(10, 10, 10)
                         .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(jScrollPane9, javax.swing.GroupLayout.PREFERRED_SIZE, 207, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(lblSclOutXml)))
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelDirectIOLayout.createSequentialGroup()
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
+                                .addComponent(lblSclOutXml)
+                                .addGap(187, 187, 187))
                             .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelDirectIOLayout.createSequentialGroup()
-                                .addComponent(btnSclCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                .addComponent(btnSclClear, javax.swing.GroupLayout.PREFERRED_SIZE, 70, javax.swing.GroupLayout.PREFERRED_SIZE))
-                            .addComponent(btnSclExecute, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                .addGap(22, 22, 22))
+                                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addComponent(jScrollPane9, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 225, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelDirectIOLayout.createSequentialGroup()
+                                        .addComponent(btnSclCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 87, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                        .addComponent(btnSclClear, javax.swing.GroupLayout.PREFERRED_SIZE, 87, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                                .addGap(10, 10, 10))))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelDirectIOLayout.createSequentialGroup()
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(btnSclExecute, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(10, 10, 10))))
         );
         sclPanelDirectIOLayout.setVerticalGroup(
             sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
-                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
-                        .addComponent(btnSclExecute, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(lblSclOutXml)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(jScrollPane9, javax.swing.GroupLayout.PREFERRED_SIZE, 248, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(2, 2, 2)
+                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
                         .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                            .addComponent(lblSclCommand)
-                            .addComponent(cmbSclCommand, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addComponent(cmbSclCommand, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(lblSclCommand))
+                        .addGap(6, 6, 6)
+                        .addComponent(lblSclInXml))
+                    .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
+                        .addComponent(btnSclExecute, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(6, 6, 6)
+                        .addComponent(lblSclOutXml)))
+                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
+                        .addComponent(jScrollPane8, javax.swing.GroupLayout.PREFERRED_SIZE, 179, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(6, 6, 6)
+                        .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(txtSclStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 20, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(lblSclStatus)))
+                    .addGroup(sclPanelDirectIOLayout.createSequentialGroup()
+                        .addComponent(jScrollPane9, javax.swing.GroupLayout.PREFERRED_SIZE, 179, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(lblSclInXml)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(jScrollPane8, javax.swing.GroupLayout.PREFERRED_SIZE, 248, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                .addGap(6, 6, 6)
-                .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(btnSclClear, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(btnSclCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(lblSclStatus)
-                    .addComponent(txtSclStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(4, 4, 4))
+                        .addGroup(sclPanelDirectIOLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(btnSclClear, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(btnSclCopy, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))))
+                .addGap(6, 6, 6))
         );
 
-        sclPanelProperties.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Properties :"));
+        sclPanelStat.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Statistics ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
+        sclPanelStat.setPreferredSize(new java.awt.Dimension(503, 69));
+
+        lblSclStatistic.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+
+        btnSclResetStat.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnSclResetStat.setText("Reset Statistics");
+        btnSclResetStat.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnSclResetStatActionPerformed(evt);
+            }
+        });
+
+        btnSclRetreiveStat.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        btnSclRetreiveStat.setText("Retrieve Statistics");
+        btnSclRetreiveStat.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnSclRetreiveStatActionPerformed(evt);
+            }
+        });
+
+        txtSclStatOutput.setColumns(4);
+        txtSclStatOutput.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
+        txtSclStatOutput.setRows(5);
+        jScrollPane10.setViewportView(txtSclStatOutput);
+
+        javax.swing.GroupLayout sclPanelStatLayout = new javax.swing.GroupLayout(sclPanelStat);
+        sclPanelStat.setLayout(sclPanelStatLayout);
+        sclPanelStatLayout.setHorizontalGroup(
+            sclPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(sclPanelStatLayout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(sclPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jScrollPane10, javax.swing.GroupLayout.PREFERRED_SIZE, 458, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(sclPanelStatLayout.createSequentialGroup()
+                        .addComponent(lblSclStatistic, javax.swing.GroupLayout.PREFERRED_SIZE, 81, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(18, 18, 18)
+                        .addComponent(btnSclRetreiveStat, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(31, 31, 31)
+                        .addComponent(btnSclResetStat, javax.swing.GroupLayout.PREFERRED_SIZE, 164, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
+        sclPanelStatLayout.setVerticalGroup(
+            sclPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(sclPanelStatLayout.createSequentialGroup()
+                .addGap(4, 4, 4)
+                .addGroup(sclPanelStatLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(lblSclStatistic, javax.swing.GroupLayout.PREFERRED_SIZE, 20, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnSclResetStat, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(btnSclRetreiveStat, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(7, 7, 7)
+                .addComponent(jScrollPane10, javax.swing.GroupLayout.PREFERRED_SIZE, 67, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(10, 10, 10))
+        );
+
+        sclPanelProperties.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createTitledBorder(""), "Properties ", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 1, 12))); // NOI18N
         sclPanelProperties.setPreferredSize(new java.awt.Dimension(480, 112));
 
+        cmbSclProperties.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         cmbSclProperties.setPreferredSize(new java.awt.Dimension(100, 28));
         cmbSclProperties.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -1435,11 +1843,19 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             }
         });
 
+        lblSclPropertyValue.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         lblSclPropertyValue.setText("Property Value ");
 
+        txtSclPropertyValue.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         txtSclPropertyValue.setHorizontalAlignment(javax.swing.JTextField.CENTER);
         txtSclPropertyValue.setPreferredSize(new java.awt.Dimension(100, 28));
+        txtSclPropertyValue.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                txtSclPropertyValueActionPerformed(evt);
+            }
+        });
 
+        btnSclProperties.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnSclProperties.setText("Set Properties");
         btnSclProperties.setPreferredSize(new java.awt.Dimension(100, 28));
         btnSclProperties.addActionListener(new java.awt.event.ActionListener() {
@@ -1453,29 +1869,27 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         sclPanelPropertiesLayout.setHorizontalGroup(
             sclPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(sclPanelPropertiesLayout.createSequentialGroup()
-                .addContainerGap(32, Short.MAX_VALUE)
+                .addGap(10, 10, 10)
                 .addGroup(sclPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
                     .addGroup(sclPanelPropertiesLayout.createSequentialGroup()
                         .addComponent(lblSclPropertyValue)
-                        .addGap(18, 18, 18)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addComponent(txtSclPropertyValue, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                    .addComponent(cmbSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 249, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(btnSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 175, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap())
+                    .addComponent(cmbSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 224, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 131, Short.MAX_VALUE)
+                .addComponent(btnSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 182, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(10, 10, 10))
         );
         sclPanelPropertiesLayout.setVerticalGroup(
             sclPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(sclPanelPropertiesLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(sclPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(cmbSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(btnSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 30, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, sclPanelPropertiesLayout.createSequentialGroup()
+                .addGap(0, 0, 0)
+                .addComponent(cmbSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(6, 6, 6)
                 .addGroup(sclPanelPropertiesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(txtSclPropertyValue, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(lblSclPropertyValue))
-                .addGap(5, 5, 5))
+                    .addComponent(lblSclPropertyValue)
+                    .addComponent(btnSclProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 28, javax.swing.GroupLayout.PREFERRED_SIZE)))
         );
 
         javax.swing.GroupLayout scalePanelLayout = new javax.swing.GroupLayout(scalePanel);
@@ -1483,48 +1897,53 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         scalePanelLayout.setHorizontalGroup(
             scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scalePanelLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                        .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(sclPanelDataEvent, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(sclPanelScaleWeight, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                        .addComponent(sclPanelProperties, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addComponent(sclPanelLiveWeight, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(6, 6, 6)
+                .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                    .addComponent(sclPanelLiveWeight, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(sclPanelDataEvent, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(sclPanelScaleWeight, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(sclPanelStat, javax.swing.GroupLayout.PREFERRED_SIZE, 485, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(sclPanelDirectIO, javax.swing.GroupLayout.PREFERRED_SIZE, 503, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(sclPanelCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(12, 12, 12))
+                    .addComponent(sclPanelDirectIO, javax.swing.GroupLayout.DEFAULT_SIZE, 488, Short.MAX_VALUE)
+                    .addComponent(sclPanelCheckHealth, javax.swing.GroupLayout.DEFAULT_SIZE, 488, Short.MAX_VALUE)
+                    .addComponent(sclPanelProperties, javax.swing.GroupLayout.DEFAULT_SIZE, 488, Short.MAX_VALUE))
+                .addGap(46, 46, 46))
         );
         scalePanelLayout.setVerticalGroup(
             scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(scalePanelLayout.createSequentialGroup()
-                .addGap(0, 0, 0)
+                .addGap(6, 6, 6)
                 .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(sclPanelDataEvent, javax.swing.GroupLayout.PREFERRED_SIZE, 102, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(sclPanelCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 102, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(sclPanelDataEvent, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(sclPanelCheckHealth, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                .addGroup(scalePanelLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
                     .addGroup(scalePanelLayout.createSequentialGroup()
-                        .addComponent(sclPanelScaleWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 176, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addComponent(sclPanelProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 95, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addComponent(sclPanelDirectIO, javax.swing.GroupLayout.PREFERRED_SIZE, 291, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addGroup(scalePanelLayout.createSequentialGroup()
+                        .addComponent(sclPanelScaleWeight, javax.swing.GroupLayout.PREFERRED_SIZE, 177, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(3, 3, 3)
                         .addComponent(sclPanelLiveWeight, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                        .addComponent(sclPanelProperties, javax.swing.GroupLayout.PREFERRED_SIZE, 100, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addComponent(sclPanelDirectIO, javax.swing.GroupLayout.PREFERRED_SIZE, 374, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(5, 5, 5))
+                        .addGap(6, 6, 6)
+                        .addComponent(sclPanelStat, javax.swing.GroupLayout.PREFERRED_SIZE, 133, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addGap(4, 4, 4))
         );
 
         jTabbedPane.addTab("", scalePanel);
 
-        panelLogView.setBorder(javax.swing.BorderFactory.createTitledBorder("Log View :"));
+        panelLogView.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createEtchedBorder(), "Log View :", javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION, javax.swing.border.TitledBorder.DEFAULT_POSITION, new java.awt.Font("Tahoma", 0, 12))); // NOI18N
+
+        jScrollPane7.setAutoscrolls(true);
 
         txtLogView.setColumns(20);
         txtLogView.setFont(new java.awt.Font("Monospaced", 0, 12)); // NOI18N
         txtLogView.setRows(5);
         jScrollPane7.setViewportView(txtLogView);
 
+        btnLogClear.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         btnLogClear.setText("Clear");
         btnLogClear.setPreferredSize(new java.awt.Dimension(100, 30));
         btnLogClear.addActionListener(new java.awt.event.ActionListener() {
@@ -1538,25 +1957,27 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         panelLogViewLayout.setHorizontalGroup(
             panelLogViewLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelLogViewLayout.createSequentialGroup()
-                .addContainerGap()
                 .addGroup(panelLogViewLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(jScrollPane7)
+                    .addGroup(panelLogViewLayout.createSequentialGroup()
+                        .addGap(12, 12, 12)
+                        .addComponent(jScrollPane7))
                     .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelLogViewLayout.createSequentialGroup()
-                        .addGap(0, 0, Short.MAX_VALUE)
-                        .addComponent(btnLogClear, javax.swing.GroupLayout.PREFERRED_SIZE, 109, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addGap(70, 70, 70)
+                        .addComponent(btnLogClear, javax.swing.GroupLayout.PREFERRED_SIZE, 87, javax.swing.GroupLayout.PREFERRED_SIZE)))
                 .addContainerGap())
         );
         panelLogViewLayout.setVerticalGroup(
             panelLogViewLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelLogViewLayout.createSequentialGroup()
-                .addComponent(jScrollPane7, javax.swing.GroupLayout.PREFERRED_SIZE, 143, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(btnLogClear, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addComponent(jScrollPane7, javax.swing.GroupLayout.DEFAULT_SIZE, 117, Short.MAX_VALUE)
+                .addGap(3, 3, 3)
+                .addComponent(btnLogClear, javax.swing.GroupLayout.PREFERRED_SIZE, 27, javax.swing.GroupLayout.PREFERRED_SIZE))
         );
 
         jLabel1.setFont(new java.awt.Font("Tahoma", 0, 24)); // NOI18N
         jLabel1.setText("JPOS Sample Application");
 
+        jLabel3.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
         jLabel3.setText("v1.0");
         jLabel3.setToolTipText("");
 
@@ -1586,30 +2007,30 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         layout.setHorizontalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
-                .addContainerGap()
+                .addGap(4, 4, 4)
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(jPanel1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                     .addGroup(layout.createSequentialGroup()
                         .addComponent(scnPanelCommonMethods, javax.swing.GroupLayout.PREFERRED_SIZE, 228, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(18, 18, 18)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addComponent(jTabbedPane, javax.swing.GroupLayout.PREFERRED_SIZE, 1020, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jTabbedPane, javax.swing.GroupLayout.PREFERRED_SIZE, 997, javax.swing.GroupLayout.PREFERRED_SIZE)
                             .addComponent(panelLogView, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                        .addGap(0, 0, Short.MAX_VALUE)))
-                .addContainerGap())
+                        .addContainerGap())))
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addContainerGap()
                 .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(layout.createSequentialGroup()
                         .addComponent(jTabbedPane, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(2, 2, 2)
-                        .addComponent(panelLogView, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addComponent(scnPanelCommonMethods, javax.swing.GroupLayout.DEFAULT_SIZE, 729, Short.MAX_VALUE)))
+                        .addGap(4, 4, 4)
+                        .addComponent(panelLogView, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addComponent(scnPanelCommonMethods, javax.swing.GroupLayout.DEFAULT_SIZE, 722, Short.MAX_VALUE))
+                .addContainerGap())
         );
 
         pack();
@@ -1661,15 +2082,58 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 status = intermediateLayer.checkHealthTextAction(deviceTypeBinder);
                 break;
             case "directInputOutput":
-                status = intermediateLayer.directIOAction(deviceTypeBinder, opCode, statusScanner, deviceParams);
+                if(opCode == DirectIOCommand.NCRDIO_SCAN_DIRECT || opCode == DirectIOCommand.DIO_NCR_SCANNER_NOF ||
+                        opCode == com.zebra.jpos.serviceonscale.directio.DirectIOCommand.NCRDIO_SCAL_DIRECT) {
+                    status = intermediateLayer.ncrDirectIOAction(deviceTypeBinder, opCode, statusScanner, deviceParams);
+                }
+                else if(opCode == DirectIOCommand.DIO_NCR_SCAN_TONE) {
+                    try {
+                        // Get the NCR tone type from the UI
+                        statusScanner[0] = Integer.parseInt(txtScnInxml.getText());
+                        status = intermediateLayer.ncrDirectIOAction(deviceTypeBinder, opCode, statusScanner, deviceParams);
+                        statusScanner[0] = DirectIOStatus.STATUS_SUCCESS;
+                    } catch (Exception e) {
+                        statusScanner[0] = -1;
+                        status[0] = "Invalid NCR Tone Type";
+                        status[1] = intermediateLayer.exceptionDialog(new JposException(0), "Invalid NCR Tone Type ");
+                    }
+                }
+                else if(opCode == com.zebra.jpos.serviceonscale.directio.DirectIOCommand.NCR_DIO_SCAL_LIVE_WEIGHT) {
+                    
+                    status = intermediateLayer.ncrDirectIOLiveWeightAction(deviceTypeBinder, opCode, statusScanner, deviceParams);
+                    // Set the weight value to deviceParams. Weight value comes in the statusScanner[0]. deviceParams is used to show the result in the UI
+                    deviceParams.append(statusScanner[0]);
+                    
+                    if(status[0].equals("Direct IO Successful"))
+                        // Set the statusScanner[0] to success
+                        statusScanner[0] = DirectIOStatus.STATUS_SUCCESS;
+                    else
+                        statusScanner[0] = -1;
+                }
+                else
+                    status = intermediateLayer.directIOAction(deviceTypeBinder, opCode, statusScanner, deviceParams);
                 break;
             case "clearInput":
                 status = intermediateLayer.clearInputAction(deviceTypeBinder);
                 break;
             case "errorOccured":
                 status = errorStatus;
+                break;
             case "setProperty":
                 status = setPropertyStatus;
+                break;
+            case "retrieveStatistics":
+                status = intermediateLayer.retrieveStatistics(deviceTypeBinder, retrieveStatValue);
+                break;
+            case "resetStatistics":
+                status = intermediateLayer.resetStatistics(deviceTypeBinder, resetStatValue);
+                break;
+            case "powerNotify":
+                status = intermediateLayer.PowerNotify(deviceTypeBinder, powerNotifyEnabled);
+                break;
+            case "powerState":
+                status = intermediateLayer.PowerState(deviceTypeBinder);
+                break;
         }
         txtLogView.setText(txtLogView.getText() + "\n" + date + " : " + deviceTypeBinder.getDevice() + "      :" + logicalName + " " + status[0]);
         if (status[1] != null) {
@@ -1724,7 +2188,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
                 break;
             //Scale : Status Notify Action
             case "statusNotify":
-                status = intermediateLayer.statusNotifyAction(deviceTypeBinder, statusNotifyEnabled, autoDeviceEnable);
+                status = intermediateLayer.statusNotifyAction(deviceTypeBinder, statusNotifyEnabled);
                 break;
             //Scale : Async Mode
             case "AsyncMode":
@@ -1757,6 +2221,8 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         chkScnAutoDeviceEnable.setSelected(false);
         chkScnFreezeEvents.setSelected(false);
         chkScnAutoDisable.setSelected(false);
+        chkScnPowerNotify.setSelected(false);
+        chkSclPowerNotify.setSelected(false);
 
         chkSclDeviceEnable.setSelected(false);
         chkSclDataEventEnable.setSelected(false);
@@ -1779,34 +2245,6 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     }//GEN-LAST:event_btnReleaseActionPerformed
 
 
-    private void cmbScnCommandActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbScnCommandActionPerformed
-        DirectIOBinding dIOCommand = (DirectIOBinding) cmbScnCommand.getSelectedItem();
-        txtScnInxml.setText(dIOCommand.getInXml());                        //display inXml in the textField        
-
-    }//GEN-LAST:event_cmbScnCommandActionPerformed
-
-    private void btnScnExecuteActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnExecuteActionPerformed
-        DirectIOBinding dIOCommand = (DirectIOBinding) cmbScnCommand.getSelectedItem();
-        deviceParams = new StringBuffer();
-        deviceParams.append(txtScnInxml.getText());
-        statusScanner = new int[]{-1};
-        opCode = dIOCommand.getOpCode();
-
-        commonMethods("directInputOutput");
-        if (directIOC) {
-            if (deviceParams.length() <= 5) {
-                deviceParams = new StringBuffer(" ");
-            }
-            txtScnOutXml.setText(deviceParams.toString());
-        }
-        txtScnStatus.setText(Arrays.toString(statusScanner).replace("[", " ").replace("]", " "));
-    }//GEN-LAST:event_btnScnExecuteActionPerformed
-
-    private void btnScnClearActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnClearActionPerformed
-        txtScnOutXml.setText("");
-        txtScnStatus.setText("");
-    }//GEN-LAST:event_btnScnClearActionPerformed
-
     private void chkSclDataEventEnableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkSclDataEventEnableActionPerformed
         if (chkSclDataEventEnable.isSelected()) {
             dataEventEnabled = true;
@@ -1814,9 +2252,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             dataEventEnabled = false;
         }
         commonMethods("enableDataEvent");
-        if (!dataEventEnableC) {
-            chkSclDataEventEnable.setSelected(false);
-        }
+        chkSclDataEventEnable.setSelected(dataEventEnableC);
     }//GEN-LAST:event_chkSclDataEventEnableActionPerformed
 
     private void chkSclEnableLiveWeightActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkSclEnableLiveWeightActionPerformed
@@ -1833,6 +2269,9 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         } else {
             statusNotifyEnabled = SCAL_SN_DISABLED;
             scaleMethods("statusNotify");
+        }
+        if (!statusNotifyC) {
+            chkSclEnableLiveWeight.setSelected(false);
         }
 
     }//GEN-LAST:event_chkSclEnableLiveWeightActionPerformed
@@ -1856,9 +2295,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             freezeEventsEnabled = false;
         }
         commonMethods("freezeEvents");
-        if (!freezeEventsC) {
-            chkSclFreezeEvents.setSelected(false);
-        }
+        chkSclFreezeEvents.setSelected(freezeEventsC);
     }//GEN-LAST:event_chkSclFreezeEventsActionPerformed
 
     private void btnSclReadWeightActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclReadWeightActionPerformed
@@ -1894,16 +2331,16 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private void chkSclDeviceEnableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkSclDeviceEnableActionPerformed
         if (chkSclDeviceEnable.isSelected()) {
             deviceEnabled = true;
+            commonMethods("enableDevice");
         } else {
             deviceEnabled = false;
             chkSclEnableLiveWeight.setEnabled(true);
+            commonMethods("enableDevice");
         }
-        commonMethods("enableDevice");
+
         chkSclEnableLiveWeight.setEnabled(false);
-        if (!deviceEnableC) {
-            chkSclDeviceEnable.setSelected(false);
-            chkSclEnableLiveWeight.setEnabled(true);
-        }
+        chkSclDeviceEnable.setSelected(deviceEnableC);
+        chkSclEnableLiveWeight.setEnabled(!deviceEnableC);
     }//GEN-LAST:event_chkSclDeviceEnableActionPerformed
 
     private void btnSclClearInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclClearInputActionPerformed
@@ -1963,10 +2400,15 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         String type = propertyBinder.getType();
         String propertyName = propertyBinder.getPropertyName();
 
-        if ("false".equals(scannerPropertyValue)) {
-            setValue = false;
-        } else if ("true".equals(scannerPropertyValue)) {
-            setValue = true;
+        if (null != scannerPropertyValue) {
+            switch (scannerPropertyValue) {
+                case "false":
+                    setValue = false;
+                    break;
+                case "true":
+                    setValue = true;
+                    break;
+            }
         }
 
         try {
@@ -2035,6 +2477,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
 
     private void btnSclExecuteActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclExecuteActionPerformed
         DirectIOBinding dIOCommand = (DirectIOBinding) cmbSclCommand.getSelectedItem();
+        ScaleDeviceTypeBinder deviceTypeBinder = (ScaleDeviceTypeBinder) cmbDeviceCategory.getSelectedItem();
         deviceParams = new StringBuffer();
         deviceParams.append(txtSclInXml.getText());
         statusScanner = new int[]{-1};
@@ -2042,11 +2485,14 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
 
         commonMethods("directInputOutput");
         if (directIOC) {
-            if (deviceParams.length() <= 5) {
-                deviceParams = new StringBuffer(" ");
-            }
             txtSclOutXml.setText(deviceParams.toString());
+        } else {
+            txtSclOutXml.setText("");
         }
+            
+        boolean sclDeviceEnabled = intermediateLayer.checkDeviceEnable(deviceTypeBinder);
+        chkSclDeviceEnable.setSelected(sclDeviceEnabled);
+
         txtSclStatus.setText(Arrays.toString(statusScanner).replace("[", " ").replace("]", " "));
     }//GEN-LAST:event_btnSclExecuteActionPerformed
 
@@ -2160,14 +2606,35 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private void chkScnDeviceEnableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkScnDeviceEnableActionPerformed
         if (chkScnDeviceEnable.isSelected()) {
             deviceEnabled = true;
+            commonMethods("enableDevice");
         } else if (!chkScnDeviceEnable.isSelected()) {
             deviceEnabled = false;
+            commonMethods("enableDevice");
         }
-        commonMethods("enableDevice");
-        if (!deviceEnableC) {
-            chkScnDeviceEnable.setSelected(false);
-        }
+        chkScnDeviceEnable.setSelected(deviceEnableC);
     }//GEN-LAST:event_chkScnDeviceEnableActionPerformed
+
+    private String powerStateText(int value) {
+        String text = "";
+        switch (value) {
+            case 2000:
+                text = "JPOS_PS_UNKNOWN";
+                break;
+            case 2001:
+                text = "JPOS_PS_ONLINE";
+                break;
+            case 2002:
+                text = "JPOS_PS_OFF";
+                break;
+            case 2003:
+                text = "JPOS_PS_OFFLINE";
+                break;
+            case 2004:
+                text = "JPOS_PS_OFF_OFFLINE";
+                break;
+        }
+        return text;
+    }
 
     private void chkScnDataEventEnableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkScnDataEventEnableActionPerformed
         if (chkScnDataEventEnable.isSelected()) {
@@ -2176,49 +2643,40 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             dataEventEnabled = false;
         }
         commonMethods("enableDataEvent");
-        if (!dataEventEnableC) {
-            chkScnDataEventEnable.setSelected(false);
-        }
+        chkScnDataEventEnable.setSelected(dataEventEnableC);
     }//GEN-LAST:event_chkScnDataEventEnableActionPerformed
 
     private void btnFastModeActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnFastModeActionPerformed
         DeviceTypeBinder deviceTypeBinder = (DeviceTypeBinder) cmbDeviceCategory.getSelectedItem();
         deviceType = deviceTypeBinder.getDevice();
 
-        if ("Scanner".equals(deviceType)) {
-            scannerMethods("fastModeScanner");
-            if (fastModeScannerC) {
-                chkScnDeviceEnable.setSelected(true);
-                chkScnDataEventEnable.setSelected(true);
-                chkScnDecodeData.setSelected(true);
-            } else if (!fastModeScannerC) {
-                chkScnDeviceEnable.setSelected(false);
-                chkScnDataEventEnable.setSelected(false);
-                chkScnDecodeData.setSelected(false);
-            }
-        } else if ("Scale  ".equals(deviceType)) {
-            scaleMethods("fastModeScale");
-            if (fastModeScaleC) {
-                chkSclDeviceEnable.setSelected(true);
-                chkSclEnableLiveWeight.setEnabled(false);
-            } else if (!fastModeScaleC) {
-                chkSclDeviceEnable.setSelected(false);
-                chkSclEnableLiveWeight.setEnabled(true);
+        if (null != deviceType) {
+            switch (deviceType) {
+                case "Scanner":
+                    scannerMethods("fastModeScanner");
+                    if (fastModeScannerC) {
+                        chkScnDeviceEnable.setSelected(true);
+                        chkScnDataEventEnable.setSelected(true);
+                        chkScnDecodeData.setSelected(true);
+                    } else if (!fastModeScannerC) {
+                        chkScnDeviceEnable.setSelected(false);
+                        chkScnDataEventEnable.setSelected(false);
+                        chkScnDecodeData.setSelected(false);
+                    }
+                    break;
+                case "Scale  ":
+                    scaleMethods("fastModeScale");
+                    if (fastModeScaleC) {
+                        chkSclDeviceEnable.setSelected(true);
+                        chkSclEnableLiveWeight.setEnabled(false);
+                    } else if (!fastModeScaleC) {
+                        chkSclDeviceEnable.setSelected(false);
+                        chkSclEnableLiveWeight.setEnabled(true);
+                    }
+                    break;
             }
         }
     }//GEN-LAST:event_btnFastModeActionPerformed
-
-    private void chkScnDecodeDataActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkScnDecodeDataActionPerformed
-        if (chkScnDecodeData.isSelected()) {
-            decodeDataEnabled = true;
-        } else if (!chkScnDecodeData.isSelected()) {
-            decodeDataEnabled = false;
-        }
-        scannerMethods("decodeData");
-        if (!decodeDataEnableC) {
-            chkScnDecodeData.setSelected(false);
-        }
-    }//GEN-LAST:event_chkScnDecodeDataActionPerformed
 
     private void chkScnAutoDataEventEnableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkScnAutoDataEventEnableActionPerformed
         if (chkScnAutoDataEventEnable.isSelected()) {
@@ -2233,24 +2691,6 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             chkScnAutoDataEventEnable.setSelected(false);
         }
     }//GEN-LAST:event_chkScnAutoDataEventEnableActionPerformed
-
-    private void scanDataHexActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_scanDataHexActionPerformed
-        txtScanDataLabel.setText(scanDataLabelHex);
-    }//GEN-LAST:event_scanDataHexActionPerformed
-
-    private void scanDataTextActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_scanDataTextActionPerformed
-        txtScanDataLabel.setText(scanDataLabelText);
-    }//GEN-LAST:event_scanDataTextActionPerformed
-
-    private void btnClearInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnClearInputActionPerformed
-        txtScanData.setText("");
-        txtScanDataLabel.setText("");
-        txtScanDataType.setText("");
-        txtDataCount.setText("");
-        scanData = "";
-        scanDataLabelText = "";
-        scanDataLabelHex = "";
-    }//GEN-LAST:event_btnClearInputActionPerformed
 
     private void btnScnCheckHealthActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnCheckHealthActionPerformed
 
@@ -2278,30 +2718,85 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             freezeEventsEnabled = false;
         }
         commonMethods("freezeEvents");
-        if (!freezeEventsC) {
-            chkScnFreezeEvents.setSelected(false);
-        }
+        chkScnFreezeEvents.setSelected(freezeEventsC);
     }//GEN-LAST:event_chkScnFreezeEventsActionPerformed
 
+    private void logicalDeviceName(String deviceCategory) {
+        SimpleEntryRegistry reg = new SimpleEntryRegistry(new SimpleXmlRegPopulator());
+        reg.load();
+
+        int scn = 0;
+        int scl = 0;
+
+        Enumeration entryCountEnum = reg.getEntries();
+
+        while (entryCountEnum.hasMoreElements()) {
+            JposEntry entry = (JposEntry) entryCountEnum.nextElement();
+            String[] deviceCount = {entry.getProp(JposEntry.DEVICE_CATEGORY_PROP_NAME).getValueAsString()};
+
+            switch (deviceCount[0]) {
+                case "Scanner":
+                    scn++;
+                    break;
+                case "Scale":
+                    scl++;
+                    break;
+            }
+        }
+
+        int i = 0;
+        int j = 0;
+
+        Object[] scnLogicalNames = new Object[scn];
+        Object[] sclLogicalNames = new Object[scl];
+
+        Enumeration entriesEnum = reg.getEntries();
+        while (entriesEnum.hasMoreElements()) {
+            JposEntry entry = (JposEntry) entriesEnum.nextElement();
+
+            String[] row = {entry.getProp(JposEntry.DEVICE_CATEGORY_PROP_NAME).getValueAsString(), entry.getLogicalName()};
+
+            switch (row[0]) {
+                case "Scanner":
+                    scnLogicalNames[i] = row[1];
+                    i++;
+                    break;
+                case "Scale":
+                    sclLogicalNames[j] = row[1];
+                    j++;
+                    break;
+            }
+        }
+
+        // Sort logical names in alphabatical order
+        Arrays.sort(scnLogicalNames);
+        Arrays.sort(sclLogicalNames);
+        
+        switch (deviceCategory) {
+            case "Scanner":
+                DefaultComboBoxModel model1 = new DefaultComboBoxModel(scnLogicalNames);
+                cmbLogicalDevice.setModel(model1);
+                break;
+            case "Scale  ":
+                DefaultComboBoxModel model2 = new DefaultComboBoxModel(sclLogicalNames);
+                cmbLogicalDevice.setModel(model2);
+                break;
+        }
+    }
+    
     private void cmbDeviceCategoryActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbDeviceCategoryActionPerformed
         DeviceTypeBinder deviceTypeBinder = (DeviceTypeBinder) cmbDeviceCategory.getSelectedItem();
         deviceType = deviceTypeBinder.getDevice();
 
-        String[] scannerTypes = new String[]{"ZebraScannerSerial", "ZebraScannerUSB", "ZebraUSBTableTop", "ZebraUSBHandHeld", "ZebraUSBOPOS", "ZebraScannerSNAPI", "ZebraAllScanners114", "ZebraAllScanners"};
-        String[] scaleTypes = new String[]{"ZebraScale", "ZebraScale114"};
-
-        DefaultComboBoxModel modelScanner = new DefaultComboBoxModel(scannerTypes);
-        DefaultComboBoxModel modelScale = new DefaultComboBoxModel(scaleTypes);
+        logicalDeviceName(deviceType);
 
         switch (deviceType) {
             case "Scanner":
-                cmbLogicalDevice.setModel(modelScanner);
                 jTabbedPane.setSelectedIndex(0);
                 scnInternalCH.setSelected(true);
                 scanDataText.setSelected(true);
                 break;
             case "Scale  ":
-                cmbLogicalDevice.setModel(modelScale);
                 jTabbedPane.setSelectedIndex(1);
                 sclInternal.setSelected(true);
                 break;
@@ -2311,14 +2806,6 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private void btnOpenActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnOpenActionPerformed
         commonMethods("open");
     }//GEN-LAST:event_btnOpenActionPerformed
-
-    private void btnScnCopyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnCopyActionPerformed
-        String outXml;
-        outXml = txtScnOutXml.getText();
-        StringSelection selection = new StringSelection(outXml);
-        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-        clipboard.setContents(selection, selection);
-    }//GEN-LAST:event_btnScnCopyActionPerformed
 
     private void btnSclCopyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclCopyActionPerformed
         String outXml;
@@ -2335,9 +2822,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             autoDisable = false;
         }
         commonMethods("autoDisable");
-        if (!autoDisableC) {
-            chkScnAutoDisable.setSelected(false);
-        }
+        chkScnAutoDisable.setSelected(autoDisableC);
     }//GEN-LAST:event_chkScnAutoDisableActionPerformed
 
     private void chkSclAutoDisableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkSclAutoDisableActionPerformed
@@ -2347,9 +2832,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
             autoDisable = false;
         }
         commonMethods("autoDisable");
-        if (!autoDisableC) {
-            chkSclAutoDisable.setSelected(false);
-        }
+        chkSclAutoDisable.setSelected(autoDisableC);
     }//GEN-LAST:event_chkSclAutoDisableActionPerformed
 
     private void chkSclAutoDeviceEnableActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkSclAutoDeviceEnableActionPerformed
@@ -2388,6 +2871,168 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
         }
     }//GEN-LAST:event_chkSclAutoDataEventEnableActionPerformed
 
+    private void btnScnResetStatActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnResetStatActionPerformed
+        resetStatValue = lblScnStatistic.getText();
+        commonMethods("resetStatistics");
+    }//GEN-LAST:event_btnScnResetStatActionPerformed
+
+    private void btnScnRetreiveStatActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnRetreiveStatActionPerformed
+        retrieveStatValue[0] = lblScnStatistic.getText();
+        commonMethods("retrieveStatistics");
+        txtScnStatOutput.setText(formatXml(retrieveStatValue[0]));
+    }//GEN-LAST:event_btnScnRetreiveStatActionPerformed
+
+    public String formatXml(String xml) {
+        Source xmlInput = new StreamSource(new StringReader(xml));
+        StringWriter stringWriter = new StringWriter();
+        try {
+            TransformerFactory transformerFactory = TransformerFactory.newInstance();
+            Transformer transformer = transformerFactory.newTransformer();
+            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+            transformer.setOutputProperty(OutputKeys.DOCTYPE_PUBLIC, "yes");
+            transformer.transform(xmlInput, new StreamResult(stringWriter));
+
+            return stringWriter.toString().trim();
+        } catch (IllegalArgumentException | TransformerException e) {
+            System.err.println("Scanner: Failed to format the xml" + e);
+            return xml;
+        }
+    }
+
+    private void btnSclRetreiveStatActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclRetreiveStatActionPerformed
+        retrieveStatValue[0] = lblSclStatistic.getText();
+        commonMethods("retrieveStatistics");
+        txtSclStatOutput.setText(formatXml(retrieveStatValue[0]));
+    }//GEN-LAST:event_btnSclRetreiveStatActionPerformed
+
+    private void btnSclResetStatActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclResetStatActionPerformed
+        resetStatValue = lblSclStatistic.getText();
+        commonMethods("resetStatistics");
+    }//GEN-LAST:event_btnSclResetStatActionPerformed
+
+    private void chkScnPowerNotifyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkScnPowerNotifyActionPerformed
+        if (chkScnPowerNotify.isSelected()) {
+            powerNotifyEnabled = JposConst.JPOS_PN_ENABLED;
+        } else {
+            powerNotifyEnabled = JposConst.JPOS_PN_DISABLED;
+        }
+        commonMethods("powerNotify");
+
+        chkScnPowerNotify.setSelected(powerNotifyC);
+    }//GEN-LAST:event_chkScnPowerNotifyActionPerformed
+
+    private void chkSclPowerNotifyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkSclPowerNotifyActionPerformed
+        if (chkSclPowerNotify.isSelected()) {
+            powerNotifyEnabled = JposConst.JPOS_PN_ENABLED;
+            commonMethods("powerNotify");
+        } else {
+            powerNotifyEnabled = JposConst.JPOS_PN_DISABLED;
+            commonMethods("powerNotify");
+        }
+        if (!powerNotifyC) {
+            chkSclPowerNotify.setSelected(false);
+        }
+    }//GEN-LAST:event_chkSclPowerNotifyActionPerformed
+
+    private void btnScnPowerStateActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnPowerStateActionPerformed
+        commonMethods("powerState");
+        txtScnPowerState.setText(powerStateText(powerState));
+    }//GEN-LAST:event_btnScnPowerStateActionPerformed
+
+    private void btnSclPowerStateActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSclPowerStateActionPerformed
+        commonMethods("powerState");
+        txtSclPowerState.setText(Integer.toString(powerState));
+    }//GEN-LAST:event_btnSclPowerStateActionPerformed
+
+    private void btnScnCopyActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnCopyActionPerformed
+        String outXml;
+        outXml = txtScnOutXml.getText();
+        StringSelection selection = new StringSelection(outXml);
+        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+        clipboard.setContents(selection, selection);
+    }//GEN-LAST:event_btnScnCopyActionPerformed
+
+    private void btnScnClearActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnClearActionPerformed
+        txtScnOutXml.setText("");
+        txtScnStatus.setText("");
+    }//GEN-LAST:event_btnScnClearActionPerformed
+
+    private void btnScnExecuteActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScnExecuteActionPerformed
+        DirectIOBinding dIOCommand = (DirectIOBinding) cmbScnCommand.getSelectedItem();
+        ScannerDeviceTypeBinder deviceTypeBinder = (ScannerDeviceTypeBinder) cmbDeviceCategory.getSelectedItem();
+        deviceParams = new StringBuffer();
+        deviceParams.append(txtScnInxml.getText());
+        statusScanner = new int[]{-1};
+        opCode = dIOCommand.getOpCode();
+        
+        commonMethods("directInputOutput");
+        if (directIOC) {
+            if (deviceParams.length() <= 5) {
+                deviceParams = new StringBuffer(" ");
+            }
+            txtScnOutXml.setText(deviceParams.toString());
+        }
+        boolean scnDeviceEnabled = intermediateLayer.checkDeviceEnable(deviceTypeBinder);
+        chkScnDeviceEnable.setSelected(scnDeviceEnabled);
+
+        txtScnStatus.setText(Arrays.toString(statusScanner).replace("[", " ").replace("]", " "));
+    }//GEN-LAST:event_btnScnExecuteActionPerformed
+
+    private void cmbScnCommandActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbScnCommandActionPerformed
+        DirectIOBinding dIOCommand = (DirectIOBinding) cmbScnCommand.getSelectedItem();
+        txtScnInxml.setText(dIOCommand.getInXml());                        //display inXml in the textField
+    }//GEN-LAST:event_cmbScnCommandActionPerformed
+
+    private void cmbLogicalDeviceActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbLogicalDeviceActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_cmbLogicalDeviceActionPerformed
+
+    private void txtClaimTimeoutActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_txtClaimTimeoutActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_txtClaimTimeoutActionPerformed
+
+    private void scanDataHexActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_scanDataHexActionPerformed
+        txtScanDataLabel.setText(scanDataLabelHex);
+    }//GEN-LAST:event_scanDataHexActionPerformed
+
+    private void chkScnDecodeDataActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_chkScnDecodeDataActionPerformed
+        if (chkScnDecodeData.isSelected()) {
+            decodeDataEnabled = true;
+        } else if (!chkScnDecodeData.isSelected()) {
+            decodeDataEnabled = false;
+        }
+        scannerMethods("decodeData");
+        if (!decodeDataEnableC) {
+            chkScnDecodeData.setSelected(false);
+        }
+    }//GEN-LAST:event_chkScnDecodeDataActionPerformed
+
+    private void btnClearInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnClearInputActionPerformed
+        txtScanData.setText("");
+        txtScanDataLabel.setText("");
+        txtScanDataType.setText("");
+        txtDataCount.setText("");
+        scanData = "";
+        scanDataLabelText = "";
+        scanDataLabelHex = "";
+    }//GEN-LAST:event_btnClearInputActionPerformed
+
+    private void scanDataTextActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_scanDataTextActionPerformed
+        txtScanDataLabel.setText(scanDataLabelText);
+    }//GEN-LAST:event_scanDataTextActionPerformed
+
+    private void txtScnHealthCheckTextActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_txtScnHealthCheckTextActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_txtScnHealthCheckTextActionPerformed
+
+    private void txtSclPropertyValueActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_txtSclPropertyValueActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_txtSclPropertyValueActionPerformed
+
+    private void txtScnStatusActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_txtScnStatusActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_txtScnStatusActionPerformed
+
     //populate the properties combo-box
     public static void main(String args[]) {
         /* Set the Nimbus look and feel */
@@ -2410,6 +3055,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
 
         /* Create and display the form */
         java.awt.EventQueue.invokeLater(new Runnable() {
+            @Override
             public void run() {
                 new JposSampleApp().setVisible(true);
             }
@@ -2430,8 +3076,11 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JButton btnSclClearInput;
     private javax.swing.JButton btnSclCopy;
     private javax.swing.JButton btnSclExecute;
+    private javax.swing.JButton btnSclPowerState;
     private javax.swing.JButton btnSclProperties;
     private javax.swing.JButton btnSclReadWeight;
+    private javax.swing.JButton btnSclResetStat;
+    private javax.swing.JButton btnSclRetreiveStat;
     private javax.swing.JButton btnSclZeroScale;
     private javax.swing.JButton btnScnCheckHealth;
     private javax.swing.JButton btnScnCheckHealthText;
@@ -2439,7 +3088,10 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JButton btnScnClearInputProperties;
     private javax.swing.JButton btnScnCopy;
     private javax.swing.JButton btnScnExecute;
+    private javax.swing.JButton btnScnPowerState;
     private javax.swing.JButton btnScnProperties;
+    private javax.swing.JButton btnScnResetStat;
+    private javax.swing.JButton btnScnRetreiveStat;
     private javax.swing.ButtonGroup buttonGroup1;
     private javax.swing.ButtonGroup checkHealthBtnGroup;
     private javax.swing.JCheckBox chkSclAsyncMode;
@@ -2450,6 +3102,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JCheckBox chkSclDeviceEnable;
     private javax.swing.JCheckBox chkSclEnableLiveWeight;
     private javax.swing.JCheckBox chkSclFreezeEvents;
+    private javax.swing.JCheckBox chkSclPowerNotify;
     private javax.swing.JCheckBox chkScnAutoDataEventEnable;
     private javax.swing.JCheckBox chkScnAutoDeviceEnable;
     private javax.swing.JCheckBox chkScnAutoDisable;
@@ -2457,6 +3110,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JCheckBox chkScnDecodeData;
     private javax.swing.JCheckBox chkScnDeviceEnable;
     private javax.swing.JCheckBox chkScnFreezeEvents;
+    private javax.swing.JCheckBox chkScnPowerNotify;
     private javax.swing.JComboBox cmbDeviceCategory;
     private javax.swing.JComboBox cmbLogicalDevice;
     private javax.swing.JComboBox cmbSclCommand;
@@ -2464,9 +3118,10 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JComboBox cmbScnCommand;
     private javax.swing.JComboBox cmbScnProperties;
     private javax.swing.JLabel jLabel1;
-    private javax.swing.JLabel jLabel2;
     private javax.swing.JLabel jLabel3;
     private javax.swing.JPanel jPanel1;
+    private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JScrollPane jScrollPane10;
     private javax.swing.JScrollPane jScrollPane2;
     private javax.swing.JScrollPane jScrollPane3;
     private javax.swing.JScrollPane jScrollPane4;
@@ -2490,12 +3145,15 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JLabel lblSclOutXml;
     private javax.swing.JLabel lblSclPropertyValue;
     private javax.swing.JLabel lblSclReadWeght;
+    private javax.swing.JTextField lblSclStatistic;
     private javax.swing.JLabel lblSclStatus;
+    private javax.swing.JLabel lblSclWeight;
     private javax.swing.JLabel lblScnCheckHealthText;
     private javax.swing.JLabel lblScnCommand;
     private javax.swing.JLabel lblScnInXml;
     private javax.swing.JLabel lblScnOutXml;
     private javax.swing.JLabel lblScnPropertyValue;
+    private javax.swing.JTextField lblScnStatistic;
     private javax.swing.JLabel lblScnStatus;
     private javax.swing.JPanel panelLogView;
     private javax.swing.JPanel scalePanel;
@@ -2511,6 +3169,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JPanel sclPanelLiveWeight;
     private javax.swing.JPanel sclPanelProperties;
     private javax.swing.JPanel sclPanelScaleWeight;
+    private javax.swing.JPanel sclPanelStat;
     private javax.swing.JRadioButton scnExternalCH;
     private javax.swing.JRadioButton scnInteractiveCH;
     private javax.swing.JRadioButton scnInternalCH;
@@ -2520,6 +3179,7 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JPanel scnPanelDirectIO;
     private javax.swing.JPanel scnPanelProperties;
     private javax.swing.JPanel scnPanelRecData;
+    private javax.swing.JPanel scnPanelStat;
     private javax.swing.JTextField txtClaimTimeout;
     private javax.swing.JTextField txtDataCount;
     private javax.swing.JTextArea txtDeviceInfo;
@@ -2532,13 +3192,17 @@ public class JposSampleApp extends javax.swing.JFrame implements DataListener, S
     private javax.swing.JTextArea txtSclInXml;
     private javax.swing.JTextField txtSclLiveWeight;
     private javax.swing.JTextArea txtSclOutXml;
+    private javax.swing.JTextField txtSclPowerState;
     private javax.swing.JTextField txtSclPropertyValue;
     private javax.swing.JTextField txtSclRWTimeout;
+    private javax.swing.JTextArea txtSclStatOutput;
     private javax.swing.JTextField txtSclStatus;
     private javax.swing.JTextField txtScnHealthCheckText;
     private javax.swing.JTextArea txtScnInxml;
     private javax.swing.JTextArea txtScnOutXml;
+    private javax.swing.JTextField txtScnPowerState;
     private javax.swing.JTextField txtScnPropertyValue;
+    private javax.swing.JTextArea txtScnStatOutput;
     private javax.swing.JTextField txtScnStatus;
     // End of variables declaration//GEN-END:variables
 

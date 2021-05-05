@@ -120,10 +120,18 @@ public class BarcodeType {
                 val = "US Planet";
                 break;
 
+            case ScannerConst.SCAN_SDT_TRIOPTIC39:
+                val = "Trioptic Code 39";
+                break;
+                
             case ScannerConst.SCAN_SDT_ISBT128:
                 val = "ISBT 128";
                 break;
-
+                
+            case ScannerConst.SCAN_SDT_Code11:
+                val = "Code 11";
+                break;
+                
             case ScannerConst.SCAN_SDT_MSI:
                 val = "MSI";
                 break;
@@ -159,6 +167,14 @@ public class BarcodeType {
             case ScannerConst.SCAN_SDT_GS1DATABAR:
                 val = "GS1 Databar";
                 break;
+                
+            case ScannerConst.SCAN_SDT_PostNet:
+                val="US Postnet";
+                break;
+
+	    case ScannerConst.SCAN_SDT_Code49:
+                val="Code 49";
+                break;             
 
             case ScannerConst.SCAN_SDT_UNKNOWN:
                 val = "Unknown";

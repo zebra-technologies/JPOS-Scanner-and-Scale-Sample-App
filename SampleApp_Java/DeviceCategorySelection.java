@@ -43,6 +43,16 @@ public class DeviceCategorySelection {
             + "  </arg-xml>\n"
             + " </cmdArgs>\n"
             + "</inArgs>";
+    
+    private final String attribGetNcrDirAccessInXml = "<inArgs>\n"
+            + " <scannerID>1</scannerID>\n"
+            + " <opcode>5000</opcode>\n"
+            + " <cmdArgs>\n"
+            + "  <arg-xml>\n"
+            + "   <attrib_list>1</attrib_list>\n"
+            + "  </arg-xml>\n"
+            + " </cmdArgs>\n"
+            + "</inArgs>";
 
     //populate the device Category drop-down list 
     public DefaultComboBoxModel deviceCategory() throws JposException {
@@ -156,9 +166,9 @@ public class DeviceCategorySelection {
 
         List<DirectIOBinding> cmd = new ArrayList<>();
 
-        String[] command = new String[]{"GET_SCANNERS", "RSM_ATTR_GETALL", "RSM_ATTR_GET", "RSM_ATTR_GETNEXT", "RSM_ATTR_SET", "RSM_ATTR_STORE", "DIO_NCR_SCANNER_NOF", "DIO_NCR_SCANNER_TONE", "DIO_SCANNER_NOT_ON_FILE", "DIO_SCANNER_DIO_NOF"};
-        String[] inXml = new String[]{"", attribGetAllInXml, attribGetInXml, attribGetInXml, attribSetInXml, attribSetInXml, "", "", "", ""};
-        int[] opCode = new int[]{DirectIOCommand.GET_SCANNERS, DirectIOCommand.RSM_ATTR_GETALL, DirectIOCommand.RSM_ATTR_GET, DirectIOCommand.RSM_ATTR_GETNEXT, DirectIOCommand.RSM_ATTR_SET, DirectIOCommand.RSM_ATTR_STORE, DirectIOCommand.DIO_NCR_SCANNER_NOF, DirectIOCommand.DIO_NCR_SCAN_TONE, DirectIOCommand.DIO_SCANNER_NOT_ON_FILE, DirectIOCommand.DIO_SCANNER_DIO_NOF};
+        String[] command = new String[]{"GET_SCANNERS", "RSM_ATTR_GETALL", "RSM_ATTR_GET", "RSM_ATTR_GETNEXT", "RSM_ATTR_SET", "RSM_ATTR_STORE", "DIO_NCR_SCANNER_NOF", "DIO_NCR_SCANNER_TONE", "DIO_SCANNER_NOT_ON_FILE", "DIO_SCANNER_DIO_NOF", "NCRDIO_SCAN_RESET", "NCRDIO_SCAN_STATUS", "NCRDIO_SCAN_DIRECT"};
+        String[] inXml = new String[]{"", attribGetAllInXml, attribGetInXml, attribGetInXml, attribSetInXml, attribSetInXml, "", "1001", "", "", "", "", attribGetNcrDirAccessInXml};
+        int[] opCode = new int[]{DirectIOCommand.GET_SCANNERS, DirectIOCommand.RSM_ATTR_GETALL, DirectIOCommand.RSM_ATTR_GET, DirectIOCommand.RSM_ATTR_GETNEXT, DirectIOCommand.RSM_ATTR_SET, DirectIOCommand.RSM_ATTR_STORE, DirectIOCommand.DIO_NCR_SCANNER_NOF, DirectIOCommand.DIO_NCR_SCAN_TONE, DirectIOCommand.DIO_SCANNER_NOT_ON_FILE, DirectIOCommand.DIO_SCANNER_DIO_NOF, DirectIOCommand.NCRDIO_SCAN_RESET, DirectIOCommand.NCRDIO_SCAN_STATUS, DirectIOCommand.NCRDIO_SCAN_DIRECT};
 
         for (int i = 0; i < command.length; i++) {
             DirectIOBinding data = new DirectIOBinding(command[i], inXml[i], opCode[i]);
@@ -176,9 +186,9 @@ public class DeviceCategorySelection {
 
         List<DirectIOBinding> cmd = new ArrayList<>();
 
-        String[] command = new String[]{"GET_SCANNERS", "RSM_ATTR_GETALL", "RSM_ATTR_GET", "RSM_ATTR_GETNEXT", "RSM_ATTR_SET", "RSM_ATTR_STORE","NCR_DIO_SCAL_LIVE_WEIGHT"};
-        String[] inXml = new String[]{"", attribGetAllInXml, attribGetInXml, attribGetInXml, attribSetInXml, attribSetInXml,""};
-        int[] opCode = new int[]{DirectIOCommand.GET_SCANNERS, DirectIOCommand.RSM_ATTR_GETALL, DirectIOCommand.RSM_ATTR_GET, DirectIOCommand.RSM_ATTR_GETNEXT, DirectIOCommand.RSM_ATTR_SET, DirectIOCommand.RSM_ATTR_STORE, com.zebra.jpos.serviceonscale.directio.DirectIOCommand.DIO_NCR_READ_WEIGHT_TIMEOUT};
+        String[] command = new String[]{"GET_SCANNERS", "RSM_ATTR_GETALL", "RSM_ATTR_GET", "RSM_ATTR_GETNEXT", "RSM_ATTR_SET", "RSM_ATTR_STORE","NCR_DIO_SCAL_LIVE_WEIGHT","NCRDIO_SCAL_STATUS", "NCRDIO_SCAL_DIRECT"};
+        String[] inXml = new String[]{"", attribGetAllInXml, attribGetInXml, attribGetInXml, attribSetInXml, attribSetInXml,"","", attribGetNcrDirAccessInXml};
+        int[] opCode = new int[]{DirectIOCommand.GET_SCANNERS, DirectIOCommand.RSM_ATTR_GETALL, DirectIOCommand.RSM_ATTR_GET, DirectIOCommand.RSM_ATTR_GETNEXT, DirectIOCommand.RSM_ATTR_SET, DirectIOCommand.RSM_ATTR_STORE, com.zebra.jpos.serviceonscale.directio.DirectIOCommand.NCR_DIO_SCAL_LIVE_WEIGHT, com.zebra.jpos.serviceonscale.directio.DirectIOCommand.NCRDIO_SCAL_STATUS, com.zebra.jpos.serviceonscale.directio.DirectIOCommand.NCRDIO_SCAL_DIRECT};
 
         for (int i = 0; i < command.length; i++) {
             DirectIOBinding data = new DirectIOBinding(command[i], inXml[i], opCode[i]);

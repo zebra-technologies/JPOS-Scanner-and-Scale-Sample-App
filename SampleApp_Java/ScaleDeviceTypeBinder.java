@@ -67,6 +67,7 @@ public class ScaleDeviceTypeBinder extends DeviceTypeBinder {
         super.releaseCommand = scale::release;
         super.closeCommand = scale::close;
         super.dEnableCommand = scale::setDeviceEnabled;
+        super.getDeviceEnableCommand = scale::getDeviceEnabled;
         super.dataEventCommand = scale::setDataEventEnabled;
         super.autoDisableCommand = scale::setAutoDisable;
         super.freezeEventsComand = scale::setFreezeEvents;
@@ -87,6 +88,11 @@ public class ScaleDeviceTypeBinder extends DeviceTypeBinder {
         super.serviceDescriptionCommand = scale::getDeviceServiceDescription;
         super.physicalDeviceDescriptionCommand = scale::getPhysicalDeviceDescription;
         super.physicalDeviceNameCommand = scale::getPhysicalDeviceName;
+        
+        super.retrieveStatCommand = scale::retrieveStatistics;
+        super.resetStatisticsCommand = scale::resetStatistics;
+        super.powerNotifyCommand = scale::setPowerNotify;
+        super.powerStateCommand = scale::getPowerState;
     }
 
     /**

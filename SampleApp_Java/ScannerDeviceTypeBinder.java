@@ -52,7 +52,7 @@ public class ScannerDeviceTypeBinder extends DeviceTypeBinder {
     private final CmdScanDataLabel scanDataLabelCommand;
     private final CmdScanDataType scanDataTypeCommand;
     private final CmdDataCount dataCountCommand;
-
+    
     /**
      * Constructor creates instances of device categories bind with their
      * methods
@@ -67,6 +67,7 @@ public class ScannerDeviceTypeBinder extends DeviceTypeBinder {
         super.releaseCommand = scanner::release;
         super.closeCommand = scanner::close;
         super.dEnableCommand = scanner::setDeviceEnabled;
+        super.getDeviceEnableCommand = scanner::getDeviceEnabled;
         super.dataEventCommand = scanner::setDataEventEnabled;
         super.autoDisableCommand = scanner::setAutoDisable;
         super.freezeEventsComand = scanner::setFreezeEvents;
@@ -86,7 +87,14 @@ public class ScannerDeviceTypeBinder extends DeviceTypeBinder {
         super.controlDescriptionCommand = scanner::getDeviceControlDescription;
         super.serviceDescriptionCommand = scanner::getDeviceServiceDescription;
         super.physicalDeviceDescriptionCommand = scanner::getPhysicalDeviceDescription;
-        super.physicalDeviceNameCommand = scanner::getPhysicalDeviceName;
+        super.physicalDeviceNameCommand = scanner::getPhysicalDeviceName;        
+
+        
+        super.updateStatCommand = scanner::updateStatistics;
+        super.retrieveStatCommand = scanner::retrieveStatistics;
+        super.resetStatisticsCommand = scanner::resetStatistics;
+        super.powerNotifyCommand = scanner::setPowerNotify;
+        super.powerStateCommand = scanner::getPowerState;
     }
 
     /**
