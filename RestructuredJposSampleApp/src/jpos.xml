@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE JposEntries PUBLIC "-//JavaPOS//DTD//EN"
+							 "jpos/res/jcl.dtd">
+<JposEntries>
+
+    <JposEntry logicalName="ZebraAllScanners114">
+        <creation factoryClass="com.zebra.jpos.service.scanner.ScannerServiceFactory" serviceClass="com.zebra.jpos.service.scanner.ScannerService114Impl"/>
+        <vendor name="Zebra Technologies" url="http://www.zebra.com"/>
+        <jpos category="Scanner" version="1.14"/>
+        <product description="Zebra Serial/USB Scanner" name="Zebra Scanner 1.14" url="http://www.zebra.com"/>
+        <!--Scanner type, default=0, valid values are: 1- ALL Scanners-->
+        <prop name="ScannerType" value="1"/>
+        <prop name="ClearQueueOnRelease" value="0"/>
+
+    </JposEntry>
+    
+    <JposEntry logicalName="ZebraAllScanners">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra Serial/USB Scanner" name="Zebra Scanner" url="https://www.zebra.com"/>
+        <prop name="ScannerType" value="ALL"/>
+        <prop name="ScannerModel" value=""/>
+        <prop name="SerialNumber" value=""/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="NcrBeepOnceScanTonePattern" type="String" value="10"/>
+        <prop name="NcrEnableBeepScanTonePattern" type="String" value="10"/>
+        <prop name="NcrDisableBeepScanTonePattern" type="String" value="10"/>
+        <prop name="DioScannerNotOnFile" type="String" value="7"/>
+        <prop name="DioScannerDioNof" type="String" value="7"/>
+        <prop name="ScanDataLabelId" type="String" value="9999"/>
+        <prop name="ResetTimeout" type="String" value="30000"/>
+        <prop name="ClearQueueOnRelease" value="0"/>
+        <prop name="BeepOnVDIEvent" value="0"/>
+    </JposEntry>
+    
+    <!--Scanner type, default="ALL", valid values : "SNAPI", "SSI", "USBIBMHID", "NIXMODB", "USBIBMTT", "SSI_BT", "USBOPOS, "VDI" -->
+    <JposEntry logicalName="ZebraScannerUSB">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra USB" name="Zebra Scanner" url="https://www.zebra.com"/>
+        <prop name="ScannerType" value="ALL"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+        
+    <JposEntry logicalName="ZebraUSBTableTop">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra USB Scanner" name="Zebra Scanner" url="https://www.zebra.com"/>
+        <prop name="ScannerType" value="USBIBMTT"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+    
+    <JposEntry logicalName="ZebraUSBHandHeld">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra USB Scanner" name="Zebra Scanner" url="https://www.zebra.com"/>
+        <prop name="ScannerType" value="USBIBMHID"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+    
+    <JposEntry logicalName="ZebraUSBOPOS">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra USB Scanner" name="Zebra Scanner" url="https://www.zebra.com"/>
+        <prop name="ScannerType" value="USBOPOS"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+    
+    <JposEntry logicalName="ZebraScannerSNAPI">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra SNAPI Scanner" name="Zebra Scanner" url="https://www.zebra.com"/>		
+        <prop name="ScannerType" value="SNAPI"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+    
+    <JposEntry logicalName="ZebraScannerSerialNIXMODB">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra Serial" name="Zebra Serial NIXMODB Scanner" url="https://www.zebra.com"/>		
+		<prop name="ScannerType" value="NIXMODB"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+	
+	<JposEntry logicalName="ZebraScannerSerialSSI">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra Serial" name="Zebra Serial SSI Scanner" url="https://www.zebra.com"/>		
+		<prop name="ScannerType" value="SSI_SERIAL"/>
+        <prop name="ExclusiveClaimLevel" value="0" />
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+    
+    <JposEntry logicalName="ZebraVDI">
+        <creation factoryClass="com.zebra.jpos.service.scanner.SymScannerSvc112Factory" serviceClass="com.zebra.jpos.service.scanner.SymScannerSvc112"/>
+        <vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scanner" version="1.12"/>
+        <product description="Zebra VDI" name="Zebra VDI Scanner" url="https://www.zebra.com"/>
+        <prop name="ScannerType" value="VDI"/>
+    </JposEntry>
+        
+    <JposEntry logicalName="ZebraScale114">
+        <creation factoryClass="com.zebra.jpos.serviceonscale.SvcServiceInstanceFactoryImpl" serviceClass="com.zebra.jpos.service.scale.ScaleService114Impl"/>
+        <vendor name="Zebra Technologies" url="http://www.zebra.com"/>
+        <jpos   category="Scale" version="1.14"/>
+        <product description="Zebra Scale" name="Zebra Scale 1.14" url="http://www.zebra.com"/>
+        <prop name="SyncReadWeightOnZeroTimeout" value="False"/>
+        <prop name="LiveWeightFrequency" value="500"/>
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+        
+    <JposEntry logicalName="ZebraScale">
+        <creation factoryClass="com.zebra.jpos.serviceonscale.SvcServiceInstanceFactoryImpl" serviceClass="com.zebra.jpos.service.scale.ScaleService113Impl"/>
+	<vendor name="Zebra Technologies" url="https://www.zebra.com"/>
+        <jpos category="Scale" version="1.13"/>
+	<product description="Zebra Scale" name="Zebra Scale" url="https://www.zebra.com"/>		
+	<prop name="ErrorOnSameWeight" value="1"/>
+        <prop name="NcrScaleReadWeightTimeout" type="String" value="300"/>
+        <prop name="NcrScaleStatusTimeout" type="String" value="300"/>
+        <prop name="NcrScaleDIODirectTimeout" type="String" value="300"/>
+        <prop name="ErrorCode" type="String" value="114"/>
+        <prop name="ExtErrorOverWeight" type="String" value="201"/>
+        <prop name="ExtErrorUnderZero" type="String" value="202"/>
+        <prop name="ExtErrorNonStableWeight" type="String" value="203"/>
+        <prop name="ExtErrorStableZeroWeight" type="String" value="204"/>
+        <prop name="ClearQueueOnRelease" value="0"/>
+    </JposEntry>
+
+</JposEntries>
